@@ -251,6 +251,8 @@ final class CompactView: NSView {
         CATransaction.commit()
     }
 
+    var restingCoverOpacity: Float { status == .paused ? CompactView.pausedCoverOpacity : 1 }
+
     private var coverOpacity: Float {
         guard coverVisible else { return 0 }
         return status == .paused ? CompactView.pausedCoverOpacity : 1

@@ -466,10 +466,13 @@ final class NotchController: NSObject, NSMenuDelegate {
         let large = player.convert(player.coverFrame, to: root)
         let (end, endRadius) = newMode == .expanded ? (large, PlayerView.coverRadius) : (small, CompactView.coverRadius)
 
-        let startBounds: CGRect, startPosition: CGPoint, startRadius: CGFloat
+        let compactOpacity = compact.restingCoverOpacity
+        let endOpacity = newMode == .expanded ? 1 : compactOpacity
+        let startBounds: CGRect, startPosition: CGPoint, startRadius: CGFloat, startOpacity: Float
         if !flyingCover.isHidden, let p = flyingCover.presentation() {
-            (startBounds, startPosition, startRadius) = (p.bounds, p.position, p.cornerRadius)
+            (startBounds, startPosition, startRadius, startOpacity) = (p.bounds, p.position, p.cornerRadius, p.opacity)
         } else {
+            startOpacity = newMode == .expanded ? compactOpacity : 1
             let start = newMode == .expanded ? small : large
             startBounds = CGRect(origin: .zero, size: start.size)
             startPosition = CGPoint(x: start.midX, y: start.midY)
@@ -483,6 +486,14 @@ final class NotchController: NSObject, NSMenuDelegate {
         flyingCover.bounds = CGRect(origin: .zero, size: end.size)
         flyingCover.position = CGPoint(x: end.midX, y: end.midY)
         flyingCover.cornerRadius = endRadius
+        flyingCover.opacity = endOpacity
+
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = startOpacity
+        fade.toValue = endOpacity
+        fade.duration = 0.35
+        fade.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        flyingCover.add(fade, forKey: "opacity")
 
         let values: [(String, Any, Any)] = [
             ("bounds", NSValue(rect: startBounds), NSValue(rect: flyingCover.bounds)),
