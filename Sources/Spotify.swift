@@ -89,6 +89,7 @@ private final class AppleEvents {
                     // Enumerações (player state) viram o próprio código de 4 letras; números, texto com ponto.
                     switch reply.descriptorType {
                     case typeEnumerated: values.append(String(fourCC: reply.enumCodeValue))
+                    case typeBoolean, typeTrue, typeFalse: values.append(reply.booleanValue ? "1" : "0")
                     case typeIEEE64BitFloatingPoint, typeIEEE32BitFloatingPoint, typeSInt32, typeSInt64:
                         values.append(String(reply.doubleValue))
                     default: values.append(reply.stringValue ?? "")
@@ -157,6 +158,8 @@ private final class AppleEvents {
     static let trackID = property("ID  ", of: track)
     static let artworkURL = property("aUrl", of: track)
     static let playerPosition = property("pPos")
+    static let shuffling = property("pShu")
+    static let repeating = property("pRep")
     /// Em milissegundos.
     static let duration = property("pDur", of: track)
     /// state, id, name, artist, album, artwork url
@@ -183,6 +186,10 @@ final class Spotify: NSObject {
     var onChange: (() -> Void)?
     /// Duração e posição da faixa atual; nil quando desconhecidas ou nada toca.
     private(set) var timing: PlaybackTiming?
+    /// Aleatório e repetir; nil enquanto desconhecidos. O aviso do Spotify não os traz: são lidos
+    /// ao abrir o player e depois de cada alteração.
+    private(set) var shuffling: Bool?
+    private(set) var repeating: Bool?
     /// true se a última troca de faixa voltou para a faixa anterior (botão "anterior" ou histórico).
     /// As views usam para inverter o sentido da animação.
     private(set) var lastChangeWentBack = false
@@ -271,6 +278,42 @@ final class Spotify: NSObject {
         timing = current
         events.set(AppleEvents.playerPosition, to: NSAppleEventDescriptor(double: current.position))
         onChange?()
+    }
+
+    func setShuffling(_ on: Bool) {
+        shuffling = on
+        events.set(AppleEvents.shuffling, to: NSAppleEventDescriptor(boolean: on))
+        onChange?()
+        confirmModes()
+    }
+
+    func setRepeating(_ on: Bool) {
+        repeating = on
+        events.set(AppleEvents.repeating, to: NSAppleEventDescriptor(boolean: on))
+        onChange?()
+        confirmModes()
+    }
+
+    /// Lê aleatório/repetir. O Spotify pode recusar (ex. contexto que não permite): a leitura corrige.
+    func refreshModes() {
+        guard nowPlaying != nil else { return }
+        events.get([AppleEvents.shuffling, AppleEvents.repeating]) { [weak self] v in
+            guard let self, let v, self.nowPlaying != nil else { return }
+            let shuffle = v[0] == "1", repeatOn = v[1] == "1"
+            guard shuffle != self.shuffling || repeatOn != self.repeating else { return }
+            self.shuffling = shuffle
+            self.repeating = repeatOn
+            self.onChange?()
+        }
+    }
+
+    private var confirmWork: DispatchWorkItem?
+
+    private func confirmModes() {
+        confirmWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.refreshModes() }
+        confirmWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
     }
 
     /// Relê posição e duração do Spotify (ex. ao abrir o player: um seek feito no Spotify não gera aviso).
@@ -383,6 +426,8 @@ final class Spotify: NSObject {
         nowPlaying = nil
         artwork = nil
         timing = nil
+        shuffling = nil
+        repeating = nil
         onChange?()
     }
 
@@ -422,6 +467,7 @@ final class Spotify: NSObject {
             self.onChange?()
             self.loadArtwork(from: v[5], trackID: np.trackID)
             self.refreshTiming()
+            self.refreshModes()
         }
     }
 
