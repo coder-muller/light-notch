@@ -52,6 +52,8 @@ tccutil reset AppleEvents com.guilherme.lightnotch
 
 In Settings you can open LightNotch at login, pick the accent color (album cover, Spotify green or white), choose how the equalizer behaves, turn individual effects on or off, pick whether scrolling changes the Mac or the Spotify volume, open the player on hover, and set how long notices stay on screen.
 
+A beta **Devices** section adds Dynamic Island-style notices: AirPods and headphones with their battery when they connect, a warning when an accessory runs low, and the MacBook battery when you plug in the charger. It reads accessory batteries through a macOS call that isn't public, so it may stop working after a system update.
+
 ## How it works
 
 LightNotch is plain AppKit and Core Animation, built with `swiftc` from a shell script, with no Xcode project and no dependencies. It doesn't poll Spotify: it waits for Spotify's playback notifications and sends Apple Events only when you press a button or open the player. Animations, including the progress bar, run on the system's render server, so the app stays close to idle while music plays.
