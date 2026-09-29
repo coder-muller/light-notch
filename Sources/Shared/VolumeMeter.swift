@@ -5,6 +5,7 @@ final class VolumeMeter: NSView {
     private let iconSize: CGFloat
     private let barHeight: CGFloat
     private let images: [NSImage]
+    private let glyphCenters: [CGFloat]
     private let icon = CALayer()
     private let symbol = CALayer()
     private let track = CALayer()
@@ -20,11 +21,12 @@ final class VolumeMeter: NSView {
         images = ["speaker.slash.fill", "speaker.fill", "speaker.wave.1.fill", "speaker.wave.2.fill", "speaker.wave.3.fill"]
             .map { NSImage(systemSymbolName: $0, accessibilityDescription: nil)?.withSymbolConfiguration(config)
                 ?? NSImage(size: NSSize(width: 1, height: 1)) }
+        glyphCenters = images.map(VolumeMeter.glyphCenterY)
         super.init(frame: frame)
         wantsLayer = true
 
         let scale = NSScreen.main?.backingScaleFactor ?? 2
-        symbol.contentsGravity = .left
+        symbol.contentsGravity = .resize
         symbol.contentsScale = scale
         icon.backgroundColor = CGColor(gray: 1, alpha: 0.75)
         icon.mask = symbol
@@ -59,8 +61,8 @@ final class VolumeMeter: NSView {
         let box = CGSize(width: iconBoxWidth, height: images.map(\.size.height).max() ?? iconSize)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        icon.frame = CGRect(x: 0, y: ((h - box.height) / 2).rounded(), width: box.width, height: box.height)
-        symbol.frame = icon.bounds
+        icon.frame = CGRect(x: 0, y: (h - box.height) / 2, width: box.width, height: box.height)
+        placeSymbol()
         let x = box.width + gap
         track.frame = CGRect(x: x, y: ((h - barHeight) / 2).rounded(), width: max(0, bounds.width - x), height: barHeight)
         track.cornerRadius = barHeight / 2
@@ -84,8 +86,40 @@ final class VolumeMeter: NSView {
         if index != imageIndex {
             imageIndex = index
             symbol.contents = images[index]
+            placeSymbol()
         }
         CATransaction.commit()
+    }
+
+    private func placeSymbol() {
+        guard images.indices.contains(imageIndex) else { return }
+        let image = images[imageIndex]
+        let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+        let y = ((icon.bounds.midY - glyphCenters[imageIndex]) * scale).rounded() / scale
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        symbol.frame = CGRect(x: 0, y: y, width: image.size.width, height: image.size.height)
+        CATransaction.commit()
+    }
+
+    private static func glyphCenterY(of image: NSImage) -> CGFloat {
+        let scale: CGFloat = 4
+        let width = Int(image.size.width * scale), height = Int(image.size.height * scale)
+        guard width > 0, height > 0,
+              let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                                      space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.alphaOnly.rawValue),
+              let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return image.size.height / 2 }
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+        guard let data = context.data?.assumingMemoryBound(to: UInt8.self) else { return image.size.height / 2 }
+        let stride = context.bytesPerRow
+        var top = -1, bottom = -1
+        for row in 0..<height where (0..<width).contains(where: { data[row * stride + $0] > 40 }) {
+            if top < 0 { top = row }
+            bottom = row
+        }
+        guard top >= 0 else { return image.size.height / 2 }
+        let center = CGFloat(top + bottom + 1) / 2 / scale
+        return image.size.height - center
     }
 
     static func fade(_ view: NSView, to alpha: CGFloat, duration: CFTimeInterval = 0.18) {
