@@ -6,6 +6,7 @@ final class NotchRootView: NSView {
     let clip = CALayer()
     var onClick: (() -> Void)?
     var onHoverChange: ((Bool) -> Void)?
+    var onScroll: ((NSEvent) -> Void)?
     var contextMenu: (() -> NSMenu?)?
 
     override init(frame: NSRect) {
@@ -49,6 +50,7 @@ final class NotchRootView: NSView {
     }
 
     override func mouseEntered(with event: NSEvent) { onHoverChange?(true) }
+    override func scrollWheel(with event: NSEvent) { onScroll?(event) }
     override func mouseExited(with event: NSEvent) { onHoverChange?(false) }
     override func mouseDown(with event: NSEvent) { onClick?() }
     override func menu(for event: NSEvent) -> NSMenu? { contextMenu?() }

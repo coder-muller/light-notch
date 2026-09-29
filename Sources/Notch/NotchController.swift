@@ -11,10 +11,17 @@ private enum Metrics {
     static let bounceRoom: CGFloat = 4
     static let closeDelay: TimeInterval = 0.25
     static let virtualNotchWidth: CGFloat = 185
+    static let volumeRow: CGFloat = 26
+    static let volumeRadius: CGFloat = 18
+    static let volumeInset: CGFloat = 16
+    static let volumeHideDelay: TimeInterval = 1.2
 }
 
 final class NotchController: NSObject, NSMenuDelegate {
-    private enum Mode { case notch, compact, expanded }
+    private enum Mode {
+        case notch, compact, compactVolume, expanded
+        var showsWings: Bool { self == .compact || self == .compactVolume }
+    }
 
     private struct Layout {
         var frame = NSRect.zero
@@ -41,6 +48,14 @@ final class NotchController: NSObject, NSMenuDelegate {
     private var isOpen = false
     private var generation = 0
     private var pendingClose: DispatchWorkItem?
+    private var volumeRemainder: CGFloat = 0
+    private var volumeShown = false
+    private var volumeHide: DispatchWorkItem?
+    private let compactMeter: VolumeMeter = {
+        let meter = VolumeMeter(frame: .zero, iconSize: 11, barHeight: 6)
+        meter.alphaValue = 0
+        return meter
+    }()
 
     private let flyingCover: CALayer = {
         let layer = CALayer()
@@ -70,6 +85,7 @@ final class NotchController: NSObject, NSMenuDelegate {
             }
         }
         root.contextMenu = { [weak self] in self?.mode == .notch ? nil : self?.menu }
+        root.onScroll = { [weak self] event in self?.scrolled(event) }
         spotify.onChange = { [weak self] in self?.spotifyChanged() }
 
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
@@ -100,12 +116,17 @@ final class NotchController: NSObject, NSMenuDelegate {
         layouts[.notch] = layout(notchSize, radius: Metrics.collapsedRadius, side: b, bottom: b)
         layouts[.compact] = layout(CGSize(width: notchSize.width + 2 * CompactView.wingWidth, height: notchSize.height),
                                    radius: Metrics.compactRadius, side: m, bottom: b)
+        layouts[.compactVolume] = layout(CGSize(width: notchSize.width + 2 * CompactView.wingWidth,
+                                                height: notchSize.height + Metrics.volumeRow),
+                                         radius: Metrics.volumeRadius, side: m, bottom: m)
         layouts[.expanded] = layout(CGSize(width: max(PlayerView.size.width + 2 * Metrics.sidePadding, notchSize.width),
                                            height: notchSize.height + Metrics.topGap + PlayerView.size.height + Metrics.bottomPadding),
                                     radius: Metrics.expandedRadius, side: m, bottom: m)
         compact?.layout(notchSize: notchSize)
 
         pendingClose?.cancel()
+        volumeHide?.cancel()
+        volumeShown = false
         generation &+= 1
         isOpen = false
         mode = desiredMode
@@ -135,6 +156,9 @@ final class NotchController: NSObject, NSMenuDelegate {
                 compact.setFrameOrigin(NSPoint(x: ((b.width - compact.frame.width) / 2).rounded(),
                                                y: b.maxY - compact.frame.height))
             }
+            let meterWidth = notchSize.width + 2 * CompactView.wingWidth - 2 * Metrics.volumeInset
+            compactMeter.frame = NSRect(x: ((b.width - meterWidth) / 2).rounded(), y: b.maxY - notchSize.height - 19,
+                                        width: meterWidth, height: 14)
         }
         syncHoverRect()
     }
@@ -146,13 +170,49 @@ final class NotchController: NSObject, NSMenuDelegate {
 
     private var desiredMode: Mode {
         if isOpen { return .expanded }
-        return spotify.nowPlaying?.isPlaying == true ? .compact : .notch
+        guard spotify.nowPlaying?.isPlaying == true else { return .notch }
+        return volumeShown ? .compactVolume : .compact
     }
 
     private func toggle() {
         cancelClose()
         isOpen = mode != .expanded
         transition(to: desiredMode)
+    }
+
+    private func scrolled(_ event: NSEvent) {
+        guard mode != .notch, spotify.nowPlaying != nil, event.momentumPhase.isEmpty else { return }
+        guard let volume = spotify.volume else {
+            spotify.refreshVolume()
+            return
+        }
+        let dy = event.isDirectionInvertedFromDevice ? -event.scrollingDeltaY : event.scrollingDeltaY
+        volumeRemainder += event.hasPreciseScrollingDeltas ? dy * 0.25 : dy * 4
+        let step = volumeRemainder.rounded(.towardZero)
+        guard step != 0 else { return }
+        volumeRemainder -= step
+        let target = min(100, max(0, volume + Int(step)))
+        if target != volume { spotify.setVolume(target) }
+        let level = CGFloat(target) / 100
+        if mode == .expanded {
+            player?.showVolume(level)
+        } else {
+            compactMeter.setLevel(level, animated: mode == .compactVolume)
+            showCompactVolume()
+        }
+    }
+
+    private func showCompactVolume() {
+        volumeShown = true
+        transition(to: desiredMode)
+        volumeHide?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.volumeShown = false
+            self.transition(to: self.desiredMode)
+        }
+        volumeHide = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Metrics.volumeHideDelay, execute: work)
     }
 
     private func cancelClose() {
@@ -189,7 +249,7 @@ final class NotchController: NSObject, NSMenuDelegate {
 
     private func updateAudioTap() {
         guard #available(macOS 14.2, *) else { return }
-        let wanted = mode == .compact && spotify.nowPlaying?.isPlaying == true
+        let wanted = mode.showsWings && spotify.nowPlaying?.isPlaying == true
         if wanted, audioTap == nil {
             let tap = AudioTap()
             tap.onLevels = { [weak self, weak tap] levels in
@@ -215,7 +275,7 @@ final class NotchController: NSObject, NSMenuDelegate {
         generation &+= 1
         let token = generation
         let growing = target.frame.width >= current.frame.width && target.frame.height >= current.frame.height
-        let damping: CGFloat = newMode == .expanded ? 24 : 34
+        let damping: CGFloat = newMode == .expanded ? 24 : newMode == .compactVolume ? 26 : 34
 
         showContent(for: newMode, animated: true)
         CATransaction.begin()
@@ -234,8 +294,8 @@ final class NotchController: NSObject, NSMenuDelegate {
     }
 
     private func flyCover(from oldMode: Mode, to newMode: Mode, damping: CGFloat) {
-        let pair: Set<Mode> = [.compact, .expanded]
-        guard pair.contains(oldMode), pair.contains(newMode),
+        guard oldMode.showsWings || oldMode == .expanded, newMode.showsWings || newMode == .expanded,
+              oldMode == .expanded || newMode == .expanded,
               !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
               let art = spotify.artwork, let player, let compact else {
             finishCoverFlight()
@@ -291,7 +351,7 @@ final class NotchController: NSObject, NSMenuDelegate {
     }
 
     private func bounce() {
-        guard mode != .expanded, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+        guard mode == .notch || mode == .compact, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
               let current = layouts[mode], current.shape.width > 0, current.shape.height > 0 else { return }
         let size = current.shape
 
@@ -338,11 +398,20 @@ final class NotchController: NSObject, NSMenuDelegate {
             fade(player, to: 0, duration: animated ? 0.12 : 0, delay: 0)
         }
 
-        if mode == .compact {
+        if mode == .compactVolume {
+            if compactMeter.superview == nil { root.content.addSubview(compactMeter) }
+            compactMeter.setAccent(Accent.color(for: spotify.artwork), animated: false)
+            VolumeMeter.fade(compactMeter, to: 1, duration: animated ? 0.2 : 0)
+        } else if compactMeter.alphaValue > 0 {
+            VolumeMeter.fade(compactMeter, to: 0, duration: animated ? 0.12 : 0)
+        }
+
+        if mode.showsWings {
             let compact = self.compact ?? makeCompact()
             compact.update()
             compact.isHidden = false
             compact.setActive(true)
+            spotify.refreshVolume()
             fade(compact, to: 1, duration: animated ? 0.2 : 0, delay: animated ? 0.12 : 0)
         } else if let compact, compact.alphaValue > 0 {
             compact.setActive(false)
@@ -353,7 +422,7 @@ final class NotchController: NSObject, NSMenuDelegate {
 
     private func hideInvisibleContent() {
         if mode != .expanded { player?.isHidden = true }
-        if mode != .compact { compact?.isHidden = true }
+        if !mode.showsWings { compact?.isHidden = true }
     }
 
     private func makePlayer() -> PlayerView {
