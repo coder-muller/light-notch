@@ -1,8 +1,5 @@
 import AppKit
 
-/// Small on/off toggle for shuffle and repeat. The symbol is a mask over a colored layer, so its
-/// color (gray when off, cover accent when on) cross-fades as a plain layer property; a dot under the
-/// icon springs in when on. Turning on plays a short pop; turning off a small dip.
 final class ModeButton: NSView {
     enum Kind { case shuffle, repeating }
 
@@ -14,7 +11,7 @@ final class ModeButton: NSView {
     private static let hoverColor = CGColor(gray: 1, alpha: 0.8)
     private static let dotSide: CGFloat = 4
 
-    private let icon = CALayer()     // colored; the symbol is its mask
+    private let icon = CALayer()
     private let symbol = CALayer()
     private let dot = CALayer()
 
@@ -38,7 +35,6 @@ final class ModeButton: NSView {
         symbol.contentsScale = scale
         symbol.frame = CGRect(origin: .zero, size: imageSize)
 
-        // Icon sits a little above center to leave room for the dot underneath.
         icon.bounds = CGRect(origin: .zero, size: imageSize)
         icon.position = CGPoint(x: ModeButton.size.width / 2, y: ModeButton.size.height / 2 + 2)
         icon.backgroundColor = ModeButton.offColor
@@ -66,8 +62,6 @@ final class ModeButton: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    // MARK: - State
-
     func setOn(_ on: Bool, animated: Bool) {
         guard on != isOn else { return }
         isOn = on
@@ -81,7 +75,6 @@ final class ModeButton: NSView {
         CATransaction.commit()
         guard animated else { return }
 
-        // Dot: springs up from a speck when on, shrinks away quickly when off.
         if on {
             let grow = CASpringAnimation(keyPath: "transform.scale")
             grow.fromValue = 0.2
@@ -107,7 +100,6 @@ final class ModeButton: NSView {
         if on { playOnMotion() } else { playOffMotion() }
     }
 
-    /// Cover accent used for the on state (icon and dot).
     func setAccent(_ color: CGColor, animated: Bool) {
         accent = color
         applyColors(animated: animated)
@@ -127,9 +119,6 @@ final class ModeButton: NSView {
         CATransaction.commit()
     }
 
-    // MARK: - Motion
-
-    /// Quick squeeze, then a slightly overshooting release (same for both kinds).
     private func playOnMotion() {
         let pop = CAKeyframeAnimation(keyPath: "transform.scale")
         pop.values = [1, 0.78, 1.12, 1]
@@ -149,8 +138,6 @@ final class ModeButton: NSView {
         dip.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
         icon.add(dip, forKey: "motion")
     }
-
-    // MARK: - Mouse
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 

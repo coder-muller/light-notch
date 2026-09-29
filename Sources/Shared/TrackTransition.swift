@@ -1,18 +1,8 @@
 import AppKit
 
-/// Track-change motion shared by the compact wings and the expanded player:
-/// a card flip for the cover, a left-to-right color wave for the equalizer and a ticker roll for text.
-/// Everything is explicit Core Animation (runs on the render server) plus short-lived helper layers.
 enum TrackTransition {
-    /// Time for the old cover to turn edge-on; the new cover, color wave and text land after it.
     static let flipOut: CFTimeInterval = 0.16
 
-    // MARK: Cover flip
-
-    /// Old art turns away around the vertical axis, then the new art (already in `layer`) turns in
-    /// with a slight spring. Two throwaway layers inside a perspective container do the flip while
-    /// the real layer is held invisible, so any anchor point / view-backed layer works.
-    /// `backwards` (previous track) turns the card the other way.
     static func flipCover(_ layer: CALayer, from oldContents: Any?, oldBackground: CGColor?, backwards: Bool) {
         let side: CGFloat = backwards ? -1 : 1
         guard let superlayer = layer.superlayer, layer.bounds.width > 0 else { return }
@@ -54,7 +44,7 @@ enum TrackTransition {
         out.fillMode = .forwards
         out.isRemovedOnCompletion = false
 
-        let dim = CABasicAnimation(keyPath: "opacity")   // a touch of shading as it turns away
+        let dim = CABasicAnimation(keyPath: "opacity")
         dim.fromValue = 1
         dim.toValue = 0.4
         dim.duration = flipOut
@@ -72,7 +62,7 @@ enum TrackTransition {
         turnIn.fillMode = .backwards
 
         let total = flipOut + turnIn.duration
-        let hold = CABasicAnimation(keyPath: "opacity")   // real layer stays hidden during the flip
+        let hold = CABasicAnimation(keyPath: "opacity")
         hold.fromValue = 0
         hold.toValue = 0
         hold.duration = total
@@ -89,10 +79,6 @@ enum TrackTransition {
         CATransaction.commit()
     }
 
-    // MARK: Equalizer color wave
-
-    /// Recolors the bars one by one, each with a tiny pop, starting as the new cover lands.
-    /// Left to right normally, right to left when going back.
     static func colorWave(_ bars: [CALayer], to color: CGColor, backwards: Bool) {
         let start = CACurrentMediaTime() + flipOut
         CATransaction.begin()
@@ -122,10 +108,6 @@ enum TrackTransition {
         CATransaction.commit()
     }
 
-    // MARK: Text roll
-
-    /// Ticker-style roll: the new text pushes the old one out (clipped to the label);
-    /// upwards normally, downwards when going back.
     static func roll(_ label: NSTextField, duration: CFTimeInterval, backwards: Bool) {
         guard let layer = label.layer else { return }
         layer.masksToBounds = true

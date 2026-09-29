@@ -8,18 +8,16 @@ struct NowPlaying: Equatable {
     var isPlaying: Bool
 }
 
-/// Posição na faixa, ancorada num instante: a posição atual é calculada, sem consultar o Spotify.
 struct PlaybackTiming: Equatable {
-    var duration: Double          // segundos
-    var position: Double          // segundos, no instante `stamp`
-    var stamp: CFTimeInterval     // CACurrentMediaTime()
+    var duration: Double
+    var position: Double
+    var stamp: CFTimeInterval
     var isPlaying: Bool
 
     func position(at time: CFTimeInterval) -> Double {
         min(duration, max(0, position + (isPlaying ? time - stamp : 0)))
     }
 
-    /// Mesma posição atual, com outro estado de reprodução (re-ancorada agora).
     func with(isPlaying playing: Bool) -> PlaybackTiming {
         let now = CACurrentMediaTime()
         return PlaybackTiming(duration: duration, position: position(at: now), stamp: now, isPlaying: playing)
@@ -27,37 +25,22 @@ struct PlaybackTiming: Equatable {
 }
 
 final class Spotify: NSObject {
-    /// nil quando o Spotify não está rodando ou está "Stopped".
     private(set) var nowPlaying: NowPlaying?
-    /// Miniatura da capa (máx 128 px no maior lado); nil até carregar / quando nada toca.
-    /// Na troca de faixa a capa anterior continua aqui até a nova chegar (as views animam a troca),
-    /// e só vira nil se a nova não vier em `staleArtworkDelay`.
     private(set) var artwork: CGImage?
-    /// Chamado SEMPRE na main thread depois que nowPlaying ou artwork mudam.
     var onChange: (() -> Void)?
-    /// Duração e posição da faixa atual; nil quando desconhecidas ou nada toca.
     private(set) var timing: PlaybackTiming?
-    /// Aleatório e repetir; nil enquanto desconhecidos. O aviso do Spotify não os traz: são lidos
-    /// ao abrir o player e depois de cada alteração.
     private(set) var shuffling: Bool?
     private(set) var repeating: Bool?
-    /// true se a última troca de faixa voltou para a faixa anterior (botão "anterior" ou histórico).
-    /// As views usam para inverter o sentido da animação.
     private(set) var lastChangeWentBack = false
 
     private let events = AppleEvents()
     private var artworkTask: URLSessionDataTask?
-    /// Incrementado em `clear()` e a cada notificação aplicada; invalida snapshots lentos.
     private var epoch = 0
     private var launchWork: DispatchWorkItem?
-    /// Última capa baixada, para não rebaixar quando a faixa muda dentro do mesmo álbum.
     private var cachedArtwork: (url: String, image: CGImage)?
-    /// Limpa a capa da faixa anterior se a nova não chegar a tempo (faixa local, anúncio, rede lenta).
     private var staleArtworkWork: DispatchWorkItem?
     private static let staleArtworkDelay: TimeInterval = 1.5
-    /// Faixas recentes (a última é a atual), para reconhecer "voltar" feito fora do app (teclado, Spotify).
     private var history: [String] = []
-    /// Momento do último "anterior" pedido por este app; uma troca logo depois conta como voltar.
     private var previousRequestedAt: CFAbsoluteTime = 0
 
     private lazy var session: URLSession = {
@@ -92,10 +75,7 @@ final class Spotify: NSObject {
         session.invalidateAndCancel()
     }
 
-    // MARK: Controles
-
     func playPause() {
-        // Toggle otimista; a notificação real corrige depois, e uma falha no envio o reverte.
         let toggled = nowPlaying.map { (id: $0.trackID, isPlaying: !$0.isPlaying) }
         let accepted = events.command("spfy", "PlPs") { [weak self] ok in
             guard !ok, let self, let toggled, var current = self.nowPlaying,
@@ -104,17 +84,14 @@ final class Spotify: NSObject {
             self.nowPlaying = current
             self.onChange?()
         }
-        // O completion é assíncrono (main), então roda depois do toggle abaixo.
         guard accepted, let toggled else { return }
         nowPlaying?.isPlaying = toggled.isPlaying
         timing = timing?.with(isPlaying: toggled.isPlaying)
         onChange?()
     }
 
-    /// Onde o Spotify está instalado; nil se não estiver.
     static var appURL: URL? { NSWorkspace.shared.urlForApplication(withBundleIdentifier: spotifyBundleID) }
 
-    /// Traz o Spotify para frente, abrindo-o se estiver fechado.
     static func open() {
         guard let url = appURL else { return }
         NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
@@ -130,7 +107,6 @@ final class Spotify: NSObject {
         events.command("spfy", "Prev")
     }
 
-    /// Pula para `seconds` na faixa atual. Atualiza a posição na hora (otimista).
     func seek(to seconds: Double) {
         guard var current = timing else { return }
         current.position = min(max(0, seconds), current.duration)
@@ -154,7 +130,6 @@ final class Spotify: NSObject {
         confirmModes()
     }
 
-    /// Lê aleatório/repetir. O Spotify pode recusar (ex. contexto que não permite): a leitura corrige.
     func refreshModes() {
         guard nowPlaying != nil else { return }
         events.get([AppleEvents.shuffling, AppleEvents.repeating]) { [weak self] v in
@@ -176,7 +151,6 @@ final class Spotify: NSObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
     }
 
-    /// Relê posição e duração do Spotify (ex. ao abrir o player: um seek feito no Spotify não gera aviso).
     func refreshTiming() {
         guard let trackID = nowPlaying?.trackID else { return }
         let asked = CACurrentMediaTime()
@@ -184,14 +158,12 @@ final class Spotify: NSObject {
             guard let self, let v, let np = self.nowPlaying, np.trackID == trackID,
                   let position = Double(v[0]), let ms = Double(v[1]), ms > 0 else { return }
             let new = PlaybackTiming(duration: ms / 1000, position: position, stamp: asked, isPlaying: np.isPlaying)
-            // Ignora diferenças mínimas (latência do Apple Event) para não mexer na barra à toa.
             if let old = self.timing, abs(old.position(at: asked) - position) < 0.5, old.duration == new.duration { return }
             self.timing = new
             self.onChange?()
         }
     }
 
-    /// Registra a nova faixa no histórico e decide se a troca foi para trás.
     private func recordTrackChange(to trackID: String) {
         let requested = CFAbsoluteTimeGetCurrent() - previousRequestedAt < 2
         previousRequestedAt = 0
@@ -205,8 +177,6 @@ final class Spotify: NSObject {
         }
     }
 
-    // MARK: Eventos
-
     @objc private func playbackChanged(_ note: Notification) {
         guard let info = note.userInfo, spotifyIsRunning() else { return clear() }
         let state = info["Player State"] as? String ?? ""
@@ -218,7 +188,6 @@ final class Spotify: NSObject {
             artist: info["Artist"] as? String ?? "",
             album: info["Album"] as? String ?? "",
             isPlaying: state == "Playing")
-        // Duração em ms e posição em segundos, quando o aviso traz.
         var newTiming: PlaybackTiming?
         if let ms = (info["Duration"] as? NSNumber)?.doubleValue, ms > 0 {
             let position = (info["Playback Position"] as? NSNumber)?.doubleValue ?? 0
@@ -241,14 +210,11 @@ final class Spotify: NSObject {
     @objc private func appLaunched(_ note: Notification) {
         let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
         guard app?.bundleIdentifier == spotifyBundleID else { return }
-        // O app ainda está subindo: espera um pouco antes de consultar.
         launchWork?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.loadSnapshot() }
         launchWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: work)
     }
-
-    // MARK: Estado
 
     private func update(_ new: NowPlaying, timing newTiming: PlaybackTiming?) {
         let trackChanged = new.trackID != nowPlaying?.trackID
@@ -304,7 +270,6 @@ final class Spotify: NSObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + Spotify.staleArtworkDelay, execute: work)
     }
 
-    /// Capa da faixa atual chegou: cancela a limpeza pendente e publica.
     private func setArtwork(_ image: CGImage) {
         staleArtworkWork?.cancel()
         staleArtworkWork = nil
@@ -312,14 +277,9 @@ final class Spotify: NSObject {
         onChange?()
     }
 
-    // MARK: Consulta inicial
-
     private func loadSnapshot() {
         let startEpoch = epoch
-        // O último item (URL da capa) é opcional: faixa local/anúncio não o tem.
         events.get(AppleEvents.snapshot, optionalFrom: AppleEvents.snapshot.count - 1) { [weak self] v in
-            // Se uma notificação ou clear() veio antes da resposta, ela é mais recente: descarta.
-            // kPSP = playing, kPSp = paused, kPSS = stopped.
             guard let self, self.epoch == startEpoch, self.nowPlaying == nil,
                   let v, v[0] == "kPSP" || v[0] == "kPSp" else { return }
             let np = NowPlaying(trackID: v[1], title: v[2], artist: v[3], album: v[4], isPlaying: v[0] == "kPSP")
@@ -331,14 +291,10 @@ final class Spotify: NSObject {
         }
     }
 
-    // MARK: Capa
-
     private func fetchArtworkURL(for trackID: String, retry: Bool = true) {
         events.get([AppleEvents.trackID, AppleEvents.artworkURL]) { [weak self] v in
-            // Descarta a resposta se a faixa já mudou de novo.
             guard let self, let v, self.nowPlaying?.trackID == trackID else { return }
             guard v[0] == trackID else {
-                // O Spotify ainda não atualizou `current track`: tenta de novo uma vez.
                 guard retry else { return }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
                     guard let self, self.nowPlaying?.trackID == trackID else { return }
@@ -355,10 +311,8 @@ final class Spotify: NSObject {
             setArtwork(cached.image)
             return
         }
-        // O CDN do Spotify serve 640 px por padrão ("…b273…"); a variante 300 px ("…1e02…") basta para 128 px.
         let small = urlString.replacingOccurrences(of: "ab67616d0000b273", with: "ab67616d00001e02")
         guard let url = Spotify.httpsURL(small) else { return }
-        // Se a variante reduzida falhar, tenta uma vez a URL original.
         let fallback = small == urlString ? nil : Spotify.httpsURL(urlString)
         download(url, fallback: fallback, cacheKey: urlString, trackID: trackID)
     }
@@ -377,7 +331,7 @@ final class Spotify: NSObject {
                 return Spotify.thumbnail(from: data)
             }
             DispatchQueue.main.async {
-                guard let self, self.nowPlaying?.trackID == trackID else { return }   // obsoleto
+                guard let self, self.nowPlaying?.trackID == trackID else { return }
                 guard let image else {
                     if let fallback {
                         self.download(fallback, fallback: nil, cacheKey: cacheKey, trackID: trackID)

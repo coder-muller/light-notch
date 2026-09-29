@@ -3,17 +3,8 @@ import AudioToolbox
 import CoreAudio
 import Foundation
 
-/// Taps Spotify's audio output with a Core Audio process tap (macOS 14.2+) and reports four band
-/// levels (bass → treble, 0...1) about 30 times per second. Nothing runs while stopped: the tap and its
-/// private aggregate device only exist between `start()` and `stop()`.
-///
-/// The tap is private and unmuted, so playback is untouched. The first start asks for the
-/// "System Audio Recording" permission (NSAudioCaptureUsageDescription); if it is denied the tap
-/// delivers silence and `onLevels(nil)` tells the UI to fall back to the synthetic animation.
-/// Setup/teardown run on a private queue: the HAL blocks while the permission prompt is on screen.
 @available(macOS 14.2, *)
 final class AudioTap {
-    /// Main thread. `nil` = no signal for a while (paused, permission denied, …).
     var onLevels: (([Float]?) -> Void)?
 
     private var tapID = AudioObjectID(kAudioObjectUnknown)
@@ -21,10 +12,8 @@ final class AudioTap {
     private var procID: AudioDeviceIOProcID?
     private let queue = DispatchQueue(label: "LightNotch.AudioTap", qos: .userInteractive)
     private let control = DispatchQueue(label: "LightNotch.AudioTap.control", qos: .userInitiated)
-    private var analyzer: Analyzer?   // only touched on `queue`
-    // Every Core Audio object below is only touched on `control`.
+    private var analyzer: Analyzer?
 
-    /// `done` (main) gets false if Spotify has no audio process yet or Core Audio refuses the tap.
     func start(_ done: @escaping (Bool) -> Void) {
         let deliver = onLevels
         control.async { [self] in
@@ -33,7 +22,6 @@ final class AudioTap {
         }
     }
 
-    /// Tears everything down asynchronously (keeps `self` alive until done).
     func stop() {
         control.async { [self] in stopTap() }
     }
@@ -84,15 +72,13 @@ final class AudioTap {
         if tapID != kAudioObjectUnknown { AudioHardwareDestroyProcessTap(tapID) }
         aggregateID = AudioObjectID(kAudioObjectUnknown)
         tapID = AudioObjectID(kAudioObjectUnknown)
-        queue.sync { analyzer = nil }   // wait for an in-flight callback, then free the FFT buffers
+        queue.sync { analyzer = nil }
     }
 
     private func fail() -> Bool {
         stopTap()
         return false
     }
-
-    // MARK: Core Audio queries
 
     private static func address(_ selector: AudioObjectPropertySelector) -> AudioObjectPropertyAddress {
         AudioObjectPropertyAddress(mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal,
@@ -107,7 +93,6 @@ final class AudioTap {
         return value.takeRetainedValue() as String
     }
 
-    /// Audio process objects of Spotify and its helpers (com.spotify.client*).
     private static func spotifyProcessObjects() -> [AudioObjectID] {
         let system = AudioObjectID(kAudioObjectSystemObject)
         var addr = address(kAudioHardwarePropertyProcessObjectList)
@@ -136,23 +121,22 @@ final class AudioTap {
     }
 }
 
-/// FFT band analyzer. Preallocated buffers, no allocation in the audio callback.
 private final class Analyzer {
     private static let log2n: vDSP_Length = 10
-    private static let size = 1 << 10          // 1024-sample window
+    private static let size = 1 << 10
     private static let silenceDB: Float = -100
-    private static let range: Float = 30       // dB of dynamic range shown by the bars
+    private static let range: Float = 30
 
     private let fft: FFTSetup
-    private let hop: Int                        // samples between analyses (~30 per second)
-    private let bands: [Range<Int>]             // FFT bins of bass, low-mid, high-mid, treble
+    private let hop: Int
+    private let bands: [Range<Int>]
     private var window = [Float](repeating: 0, count: Analyzer.size)
     private var samples = [Float](repeating: 0, count: Analyzer.size)
     private var windowed = [Float](repeating: 0, count: Analyzer.size)
     private var real = [Float](repeating: 0, count: Analyzer.size / 2)
     private var imag = [Float](repeating: 0, count: Analyzer.size / 2)
     private var power = [Float](repeating: 0, count: Analyzer.size / 2)
-    private var write = 0                       // ring buffer position
+    private var write = 0
     private var sinceLast = 0
     private var peaks = [Float](repeating: -60, count: 4)
     private var levels = [Float](repeating: 0, count: 4)
@@ -171,14 +155,12 @@ private final class Analyzer {
 
     deinit { vDSP_destroy_fftsetup(fft) }
 
-    /// Mixes the input to mono into the ring buffer and emits levels every `hop` samples.
     func consume(_ list: UnsafePointer<AudioBufferList>, emit: ([Float]?) -> Void) {
         let buffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: list))
         guard let first = buffers.first, let data = first.mData else { return }
         let channels = Int(max(1, first.mNumberChannels))
         let frames = Int(first.mDataByteSize) / (MemoryLayout<Float>.size * channels)
         let left = data.assumingMemoryBound(to: Float.self)
-        // Non-interleaved stereo arrives as two buffers.
         let right = buffers.count > 1 ? buffers[1].mData?.assumingMemoryBound(to: Float.self) : nil
 
         for i in 0..<frames {
@@ -201,7 +183,6 @@ private final class Analyzer {
     }
 
     private func analyze() -> [Float]? {
-        // Unroll the ring buffer (oldest first) while applying the Hann window.
         let n = Analyzer.size
         for i in 0..<n { windowed[i] = samples[(write + i) & (n - 1)] * window[i] }
 
@@ -224,14 +205,12 @@ private final class Analyzer {
             }
             let db = 10 * log10(mean + 1e-12)
             if db > Analyzer.silenceDB { silent = false }
-            // Auto gain: the band's recent peak decays ~3 dB/s, so quiet and loud tracks both fill the bars.
             peaks[b] = max(db, peaks[b] - 0.1)
             let level = min(1, max(0, (db - (peaks[b] - Analyzer.range)) / Analyzer.range))
-            // Fast attack, slower release.
             levels[b] = max(level, levels[b] * 0.8)
         }
 
         silentFrames = silent ? silentFrames + 1 : 0
-        return silentFrames > 45 ? nil : levels   // ~1.5 s of true silence
+        return silentFrames > 45 ? nil : levels
     }
 }

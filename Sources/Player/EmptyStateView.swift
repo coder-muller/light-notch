@@ -1,6 +1,5 @@
 import AppKit
 
-/// "Nothing playing": a small note badge, two lines of text and a pill to open Spotify, centered as a row.
 final class EmptyStateView: NSView {
     private static let green = NSColor(srgbRed: 29 / 255, green: 185 / 255, blue: 84 / 255, alpha: 1)
 
@@ -8,15 +7,12 @@ final class EmptyStateView: NSView {
     private let text = NSView()
     private let openButton = PillButton(title: "Abrir Spotify")
 
-    /// Elements in reveal order.
     var pieces: [NSView] { Spotify.appURL == nil ? [badge, text] : [badge, text, openButton] }
-
 
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
 
-        // Badge: soft circle with a green note.
         let side: CGFloat = 40
         badge.wantsLayer = true
         badge.layer?.backgroundColor = NSColor(white: 1, alpha: 0.07).cgColor
@@ -28,7 +24,6 @@ final class EmptyStateView: NSView {
         note.contentTintColor = EmptyStateView.green
         badge.addSubview(note)
 
-        // Two left-aligned lines.
         let title = label("Nada tocando", .systemFont(ofSize: 14, weight: .semibold), .white)
         let subtitle = label("Dê play no Spotify",
                              .systemFont(ofSize: 12, weight: .medium), NSColor(white: 1, alpha: 0.5))
@@ -46,7 +41,6 @@ final class EmptyStateView: NSView {
         openButton.action = #selector(openSpotify)
         let showButton = Spotify.appURL != nil
 
-        // Row: badge, 12 pt, text, 18 pt, button; centered in the view.
         let gap: CGFloat = 12, buttonGap: CGFloat = 18
         var width = side + gap + textWidth
         if showButton { width += buttonGap + openButton.frame.width }
@@ -78,7 +72,6 @@ final class EmptyStateView: NSView {
     @objc private func openSpotify() { Spotify.open() }
 }
 
-/// Capsule text button with a hover tint; reacts to the first click on the non-key panel.
 final class PillButton: NSButton {
     private static let rest = NSColor(white: 1, alpha: 0.1).cgColor
     private static let hover = NSColor(white: 1, alpha: 0.18).cgColor

@@ -1,14 +1,10 @@
 import AppKit
 
-/// Borderless image button that reacts to the first click even when the panel is not key,
-/// with a soft capsule highlight on hover and a subtle dim while pressed.
 final class TapButton: NSButton {
-    /// Alpha when idle (1 enabled, dimmed when disabled).
     var restingAlpha: CGFloat = 1 {
         didSet { alphaValue = restingAlpha }
     }
 
-    /// Standalone sublayer (keeps implicit animations, unlike the view's backing layer).
     private let highlight = CALayer()
 
     override init(frame: NSRect) {
@@ -47,7 +43,7 @@ final class TapButton: NSButton {
     override func mouseDown(with event: NSEvent) {
         guard isEnabled else { return }
         alphaValue = restingAlpha * 0.55
-        super.mouseDown(with: event)   // runs the tracking loop until mouse up
+        super.mouseDown(with: event)
         alphaValue = restingAlpha
     }
 

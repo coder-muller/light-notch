@@ -2,32 +2,23 @@ import AppKit
 
 private enum Metrics {
     static let sidePadding: CGFloat = 20
-    static let topGap: CGFloat = 8          // space between the notch band and the content
+    static let topGap: CGFloat = 8
     static let bottomPadding: CGFloat = 16
     static let collapsedRadius: CGFloat = 10
     static let compactRadius: CGFloat = 12
     static let expandedRadius: CGFloat = 24
-    static let springMargin: CGFloat = 8    // transparent room so the spring overshoot is not clipped
-    static let bounceRoom: CGFloat = 4      // permanent room below the notch/wings for the hover bounce
-    static let closeDelay: TimeInterval = 0.25   // after the cursor leaves the expanded panel
+    static let springMargin: CGFloat = 8
+    static let bounceRoom: CGFloat = 4
+    static let closeDelay: TimeInterval = 0.25
     static let virtualNotchWidth: CGFloat = 185
 }
 
-/// Borderless, non-activating panel that floats above the menu bar, on every Space and over full-screen apps.
-/// Places the panel over the notch and drives a three-state machine:
-/// `.notch` (idle), `.compact` (music playing: Dynamic Island-style side wings) and `.expanded`
-/// (opened by a click on the notch/wings; closes when the cursor leaves it or on a click on empty space).
-///
-/// The window always matches the current state's shape (plus a small transparent margin for the spring),
-/// so the tracking area only fires over the visible black shape and the rest of the menu bar stays clickable.
-/// Growing swaps the window frame first and then animates; shrinking animates first and swaps the frame
-/// when the animation ends. The shape itself is animated by Core Animation on the render server.
 final class NotchController: NSObject, NSMenuDelegate {
     private enum Mode { case notch, compact, expanded }
 
     private struct Layout {
-        var frame = NSRect.zero      // window frame (screen coordinates)
-        var shape = CGSize.zero      // visible black shape
+        var frame = NSRect.zero
+        var shape = CGSize.zero
         var radius: CGFloat = 0
     }
 
@@ -36,7 +27,7 @@ final class NotchController: NSObject, NSMenuDelegate {
     private let root = NotchRootView(frame: .zero)
     private var player: PlayerView?
     private var compact: CompactView?
-    private var audioTap: AnyObject?            // AudioTap (macOS 14.2+); only alive while the wings show
+    private var audioTap: AnyObject?
     private lazy var menu: NSMenu = {
         let menu = NSMenu()
         menu.delegate = self
@@ -47,11 +38,10 @@ final class NotchController: NSObject, NSMenuDelegate {
     private var notchSize = CGSize.zero
     private var layouts: [Mode: Layout] = [:]
     private var mode = Mode.notch
-    private var isOpen = false                  // user clicked to expand
-    private var generation = 0                  // invalidates completion blocks of superseded transitions
+    private var isOpen = false
+    private var generation = 0
     private var pendingClose: DispatchWorkItem?
 
-    /// Copy of the artwork that flies between the compact and expanded cover slots.
     private let flyingCover: CALayer = {
         let layer = CALayer()
         layer.masksToBounds = true
@@ -63,7 +53,6 @@ final class NotchController: NSObject, NSMenuDelegate {
     }()
 
     private var shape: CALayer { root.shape }
-    /// The black shape and the content clip: every geometry change and animation goes to both.
     private var shapeLayers: [CALayer] { [root.shape, root.clip] }
 
     init(spotify: Spotify) {
@@ -89,8 +78,6 @@ final class NotchController: NSObject, NSMenuDelegate {
         panel.orderFrontRegardless()
     }
 
-    // MARK: Geometry
-
     private func layoutForScreen() {
         guard let screen = NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 }) ?? NSScreen.main else { return }
         let frame = screen.frame
@@ -99,12 +86,10 @@ final class NotchController: NSObject, NSMenuDelegate {
            let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea {
             notchSize = CGSize(width: frame.width - left.width - right.width, height: screen.safeAreaInsets.top)
         } else {
-            // No hardware notch: draw a virtual one as tall as the menu bar.
             let menuBar = frame.maxY - screen.visibleFrame.maxY
             notchSize = CGSize(width: Metrics.virtualNotchWidth, height: menuBar > 0 ? menuBar : 24)
         }
 
-        /// Window frame hugging `shape` at the top-center of the screen, with `margin` on the sides/bottom.
         func layout(_ shape: CGSize, radius: CGFloat, side: CGFloat, bottom: CGFloat) -> Layout {
             let w = shape.width + 2 * side, h = shape.height + bottom
             return Layout(frame: NSRect(x: frame.midX - w / 2, y: frame.maxY - h, width: w, height: h).integral,
@@ -120,7 +105,6 @@ final class NotchController: NSObject, NSMenuDelegate {
                                     radius: Metrics.expandedRadius, side: m, bottom: m)
         compact?.layout(notchSize: notchSize)
 
-        // Jump (without animation) to the right state for the new screen.
         pendingClose?.cancel()
         generation &+= 1
         isOpen = false
@@ -140,7 +124,6 @@ final class NotchController: NSObject, NSMenuDelegate {
         updateAudioTap()
     }
 
-    /// Resizes the window and re-pins everything to its top-center (the one point that never moves).
     private func setWindowFrame(_ frame: NSRect) {
         withoutActions {
             if panel.frame != frame { panel.setFrame(frame, display: false) }
@@ -156,13 +139,10 @@ final class NotchController: NSObject, NSMenuDelegate {
         syncHoverRect()
     }
 
-    /// Points the root's hover/click area at the shape's model rect (top-center of the window).
     private func syncHoverRect() {
         let b = root.bounds, size = shape.bounds.size
         root.hoverRect = NSRect(x: b.midX - size.width / 2, y: b.maxY - size.height, width: size.width, height: size.height)
     }
-
-    // MARK: State machine
 
     private var desiredMode: Mode {
         if isOpen { return .expanded }
@@ -186,8 +166,6 @@ final class NotchController: NSObject, NSMenuDelegate {
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
             self.pendingClose = nil
-            // Ignore spurious exits (e.g. while the window is resized under the cursor): test against the
-            // visible shape, not the window (which has a transparent spring margin), with 1 pt of slack.
             if let open = self.layouts[.expanded] {
                 let visible = NSRect(x: open.frame.midX - open.shape.width / 2, y: open.frame.maxY - open.shape.height,
                                      width: open.shape.width, height: open.shape.height)
@@ -200,7 +178,6 @@ final class NotchController: NSObject, NSMenuDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + Metrics.closeDelay, execute: work)
     }
 
-    // Menu tracking can swallow mouseExited; re-check where the cursor ended up.
     func menuDidClose(_ menu: NSMenu) { scheduleClose() }
 
     private func spotifyChanged() {
@@ -210,7 +187,6 @@ final class NotchController: NSObject, NSMenuDelegate {
         updateAudioTap()
     }
 
-    /// Runs the audio tap only while the wings are visible and music plays; otherwise frees it.
     private func updateAudioTap() {
         guard #available(macOS 14.2, *) else { return }
         let wanted = mode == .compact && spotify.nowPlaying?.isPlaying == true
@@ -222,7 +198,6 @@ final class NotchController: NSObject, NSMenuDelegate {
             }
             audioTap = tap
             tap.start { [weak self, weak tap] ok in
-                // On failure the synthetic animation simply keeps running.
                 guard !ok, let self, let tap, self.audioTap === tap else { return }
                 self.audioTap = nil
             }
@@ -245,10 +220,8 @@ final class NotchController: NSObject, NSMenuDelegate {
         showContent(for: newMode, animated: true)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        // Growing: make room first (the transparent window swap is invisible).
         if growing { setWindowFrame(target.frame) }
         CATransaction.setCompletionBlock { [weak self] in
-            // Only if no newer transition happened meanwhile: shrink the window, hide faded-out views.
             guard let self, self.generation == token else { return }
             self.finishCoverFlight()
             if !growing { self.setWindowFrame(target.frame) }
@@ -260,11 +233,6 @@ final class NotchController: NSObject, NSMenuDelegate {
         updateAudioTap()
     }
 
-    // MARK: Shared cover
-
-    /// Compact <-> expanded: the small wing cover grows into the player's cover (and back) along the same
-    /// spring as the shape, while the real covers stay hidden. Must run inside the transition's transaction
-    /// (its completion block calls `finishCoverFlight()`), after the window has been resized.
     private func flyCover(from oldMode: Mode, to newMode: Mode, damping: CGFloat) {
         let pair: Set<Mode> = [.compact, .expanded]
         guard pair.contains(oldMode), pair.contains(newMode),
@@ -280,7 +248,6 @@ final class NotchController: NSObject, NSMenuDelegate {
         let large = player.convert(player.coverFrame, to: root)
         let (end, endRadius) = newMode == .expanded ? (large, PlayerView.coverRadius) : (small, CompactView.coverRadius)
 
-        // Start from wherever the flying cover is on screen if a flight is interrupted.
         let startBounds: CGRect, startPosition: CGPoint, startRadius: CGFloat
         if !flyingCover.isHidden, let p = flyingCover.presentation() {
             (startBounds, startPosition, startRadius) = (p.bounds, p.position, p.cornerRadius)
@@ -312,7 +279,6 @@ final class NotchController: NSObject, NSMenuDelegate {
         }
     }
 
-    /// Lands the flight: real covers back on, flying copy hidden.
     private func finishCoverFlight() {
         compact?.setCoverVisible(true)
         player?.setCoverVisible(true)
@@ -324,29 +290,19 @@ final class NotchController: NSObject, NSMenuDelegate {
         }
     }
 
-    // MARK: Hover bounce
-
-    /// Tiny squash-and-stretch of the shape when the cursor enters the idle notch or the wings,
-    /// just to acknowledge it is there. The window always keeps `bounceRoom` around these shapes
-    /// (resizing it on the fly lands a few frames late and clips the overshoot).
     private func bounce() {
         guard mode != .expanded, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
               let current = layouts[mode], current.shape.width > 0, current.shape.height > 0 else { return }
         let size = current.shape
 
-        // Grows 2*dx wider and 2*dy taller (anchor is top-center, so it expands down and sideways).
-        // Content shifts by half of that: dx sideways, dy down (vertical center of the grown shape).
         let dx: CGFloat = 3, dy: CGFloat = 1.5
         let peak = CATransform3DMakeScale((size.width + 2 * dx) / size.width, (size.height + 2 * dy) / size.height, 1)
 
         let bounce = bounceAnimation(peak: peak)
         shapeLayers.forEach { $0.add(bounce, forKey: "bounce") }
-        // Wing content rides along: cover/equalizer follow the grown edges (translated, never stretched).
         if mode == .compact { compact?.bounce(dx: dx, dy: dy, animation: bounceAnimation) }
     }
 
-    /// Ball-like hop: identity -> `peak` -> identity -> a smaller hop -> identity. Never goes past identity
-    /// in the other direction (a spring would undershoot and shrink the shape, uncovering the real notch).
     private func bounceAnimation(peak: CATransform3D) -> CAAnimation {
         func lerp(_ t: CGFloat) -> NSValue {
             let i = CATransform3DIdentity
@@ -368,14 +324,10 @@ final class NotchController: NSObject, NSMenuDelegate {
         return anim
     }
 
-    // MARK: Content
-
-    /// Fades in the view that belongs to `mode` and fades out the other one. Views are created lazily.
     private func showContent(for mode: Mode, animated: Bool) {
         if mode == .expanded {
             let player = self.player ?? makePlayer()
             player.update()
-            // Seeks and shuffle/repeat changes made inside Spotify send no notification: re-read on open.
             if animated {
                 spotify.refreshTiming()
                 spotify.refreshModes()
@@ -393,14 +345,12 @@ final class NotchController: NSObject, NSMenuDelegate {
             compact.setActive(true)
             fade(compact, to: 1, duration: animated ? 0.2 : 0, delay: animated ? 0.12 : 0)
         } else if let compact, compact.alphaValue > 0 {
-            // Long enough to see the bars ease down to rest (CompactView settles them) while fading.
             compact.setActive(false)
             fade(compact, to: 0, duration: animated ? 0.25 : 0, delay: 0)
         }
         if !animated { hideInvisibleContent() }
     }
 
-    /// Hidden views are skipped by hit-testing and rendering.
     private func hideInvisibleContent() {
         if mode != .expanded { player?.isHidden = true }
         if mode != .compact { compact?.isHidden = true }
@@ -411,7 +361,7 @@ final class NotchController: NSObject, NSMenuDelegate {
         player.alphaValue = 0
         root.content.addSubview(player)
         self.player = player
-        setWindowFrame(panel.frame)   // position it
+        setWindowFrame(panel.frame)
         return player
     }
 
@@ -421,13 +371,10 @@ final class NotchController: NSObject, NSMenuDelegate {
         compact.alphaValue = 0
         root.content.addSubview(compact)
         self.compact = compact
-        setWindowFrame(panel.frame)   // position it
+        setWindowFrame(panel.frame)
         return compact
     }
 
-    // MARK: Animation helpers
-
-    /// Springs the shape from wherever it currently is on screen (handles interrupted animations).
     private func animateShape(to size: CGSize, radius: CGFloat, damping: CGFloat) {
         let presentation = shape.presentation() ?? shape
         let target = CGRect(origin: .zero, size: size)

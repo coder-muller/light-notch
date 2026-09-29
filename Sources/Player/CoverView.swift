@@ -1,14 +1,11 @@
 import AppKit
 
-/// The player's cover. Clicking it opens Spotify; on hover it dims slightly and shows a small
-/// "open" arrow, so the click is discoverable.
 final class CoverView: NSView {
     var onClick: (() -> Void)?
 
     private let shade = CALayer()
-    private let arrow = CALayer()   // white; the symbol is its mask
+    private let arrow = CALayer()
 
-    /// Call after the other subviews are added, so the overlay sits above them.
     func installHoverOverlay() {
         guard let layer else { return }
         shade.frame = layer.bounds
@@ -44,13 +41,11 @@ final class CoverView: NSView {
     override func mouseEntered(with event: NSEvent) { setHover(true, animated: true) }
     override func mouseExited(with event: NSEvent) { setHover(false, animated: true) }
 
-    // Collapsing the notch can swallow mouseExited: start clean next time.
     override func viewDidHide() {
         super.viewDidHide()
         setHover(false, animated: false)
     }
 
-    // Consumed here (not passed to the root), so a click on the cover never toggles the notch.
     override func mouseDown(with event: NSEvent) {
         arrow.transform = CATransform3DMakeScale(0.85, 0.85, 1)
     }

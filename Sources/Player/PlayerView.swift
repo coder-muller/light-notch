@@ -1,15 +1,9 @@
 import AppKit
 
-/// Now-playing strip shown inside the expanded notch: cover, title/artist and transport buttons,
-/// or a minimal empty state when nothing plays. Switching between the two is animated.
-/// Pure AppKit, fixed frames, no timers/observers. The parent calls `update()` on every change.
 final class PlayerView: NSView {
     static let size = NSSize(width: 360, height: rowHeight + ProgressBar.height)
-    /// Cover / text / buttons row, above the progress bar.
     private static let rowHeight: CGFloat = 64
     private static let rowY = ProgressBar.height
-
-    // MARK: - Cached symbol images
 
     private static func symbol(_ name: String, _ pointSize: CGFloat, _ weight: NSFont.Weight) -> NSImage {
         let config = NSImage.SymbolConfiguration(pointSize: pointSize, weight: weight)
@@ -23,17 +17,11 @@ final class PlayerView: NSView {
     private static let pauseImage = symbol("pause.fill", 20, .semibold)
     private static let noteImage = symbol("music.note", 24, .regular)
 
-
-    // MARK: - Layout constants
-
     private static let coverSide: CGFloat = 64
     static let coverRadius: CGFloat = 10
     private static let textX: CGFloat = coverSide + 12
 
-    // MARK: - State
-
     private let spotify: Spotify
-    /// Holds the now-playing elements; faded out as a whole when the empty state takes over.
     private let content = NSView(frame: NSRect(origin: .zero, size: PlayerView.size))
     private let empty = EmptyStateView(frame: NSRect(origin: .zero, size: PlayerView.size))
     private var showingEmpty = false
@@ -48,12 +36,9 @@ final class PlayerView: NSView {
     private let repeatButton = ModeButton(kind: .repeating)
     private let progress = ProgressBar(frame: NSRect(x: 0, y: 0, width: PlayerView.size.width, height: ProgressBar.height))
 
-    // Last applied state (avoids redundant work in update()).
     private var hasApplied = false
     private var appliedNowPlaying: NowPlaying?
     private var appliedArtwork: CGImage?
-
-    // MARK: - Init
 
     init(spotify: Spotify) {
         self.spotify = spotify
@@ -100,7 +85,6 @@ final class PlayerView: NSView {
     }
 
     private func setupLabels() {
-        // Title/artist share the button row's center line (the play/pause button sits right under them).
         let width = PlayerView.size.width - PlayerView.textX
 
         configure(titleLabel,
@@ -129,8 +113,6 @@ final class PlayerView: NSView {
     }
 
     private func setupButtons() {
-        // Transport buttons centered horizontally in the text column (play/pause exactly under the labels),
-        // with shuffle and repeat at the outer ends of the row.
         let widths: [CGFloat] = [36, 40, 36]
         let gap: CGFloat = 12
         let modeGap: CGFloat = 14
@@ -179,28 +161,18 @@ final class PlayerView: NSView {
         nextButton.setAccessibilityLabel("Próxima faixa")
     }
 
-    // MARK: - Shared cover transition
-
-    /// Cover rect in this view's coordinates (the parent flies a copy of the artwork to/from here).
     var coverFrame: NSRect { cover.convert(cover.bounds, to: self) }
 
-    /// Hides the real cover while the parent's flying copy stands in for it.
     func setCoverVisible(_ visible: Bool) { cover.alphaValue = visible ? 1 : 0 }
-
-    // MARK: - Actions
 
     @objc private func previousTapped() { spotify.previousTrack() }
     @objc private func playPauseTapped() { spotify.playPause() }
     @objc private func nextTapped() { spotify.nextTrack() }
 
-    // MARK: - Update
-
-    /// Reads the Spotify state and touches only what changed since the last call.
     func update() {
         let np = spotify.nowPlaying
         let art = spotify.artwork
         let visible = hasApplied && !isHidden && window != nil
-        // Track-change motion only makes sense while the song was already on screen.
         let wasShowingSong = hasApplied && !showingEmpty
 
         if !hasApplied || np != appliedNowPlaying {
@@ -209,7 +181,6 @@ final class PlayerView: NSView {
         }
 
         if !hasApplied || art !== appliedArtwork {
-            // Nothing playing: keep the last cover so it fades out with the rest.
             if np != nil || !hasApplied {
                 applyArtwork(art, animate: visible && wasShowingSong)
                 let accent = Accent.color(for: art)
@@ -220,7 +191,6 @@ final class PlayerView: NSView {
             appliedArtwork = art
         }
 
-        // Nothing playing: the bar keeps its last state and fades out with the rest.
         if np != nil {
             progress.setTiming(spotify.timing, animated: visible && wasShowingSong)
             shuffleButton.setOn(spotify.shuffling ?? false, animated: visible && wasShowingSong)
@@ -230,8 +200,6 @@ final class PlayerView: NSView {
         setShowingEmpty(np == nil, animated: visible)
         hasApplied = true
     }
-
-    // MARK: - Empty <-> song
 
     private func setShowingEmpty(_ isEmpty: Bool, animated: Bool) {
         guard isEmpty != showingEmpty || !hasApplied else { return }
@@ -250,7 +218,6 @@ final class PlayerView: NSView {
             return
         }
         Motion.conceal(outgoing) { [weak self] in
-            // Only if the state did not flip back meanwhile.
             guard let self, self.showingEmpty == isEmpty else { return }
             outgoing.isHidden = true
         }
@@ -260,7 +227,6 @@ final class PlayerView: NSView {
 
     private func applyNowPlaying(_ np: NowPlaying?, previous: NowPlaying?, animate: Bool) {
         for button in [previousButton, playPauseButton, nextButton] { button.isEnabled = np != nil }
-        // Nothing playing: the song content fades out as it was (the empty state covers it).
         guard let np else { return }
 
         if np.title != titleLabel.stringValue {
@@ -280,8 +246,6 @@ final class PlayerView: NSView {
     }
 
     private func applyArtwork(_ art: CGImage?, animate: Bool) {
-        // Backing layers of layer-backed views already have implicit animations disabled;
-        // the transaction makes that explicit and cheap.
         let oldContents = cover.layer?.contents, oldBackground = cover.layer?.backgroundColor
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -294,8 +258,6 @@ final class PlayerView: NSView {
         }
     }
 
-    // MARK: - Backing scale
-
     override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
         if let scale = window?.backingScaleFactor {
@@ -304,10 +266,6 @@ final class PlayerView: NSView {
     }
 }
 
-// MARK: - Motion
-
-/// Enter/leave animations for the empty <-> song switch (explicit layer animations; model values
-/// are set directly so nothing snaps when the animations end).
 private enum Motion {
     static func set(_ view: NSView, alpha: CGFloat) {
         CATransaction.begin()
@@ -317,7 +275,6 @@ private enum Motion {
         CATransaction.commit()
     }
 
-    /// Quick fade while drifting up a few points.
     static func conceal(_ view: NSView, completion: @escaping () -> Void) {
         guard let layer = view.layer else { set(view, alpha: 0); completion(); return }
         let from = layer.presentation()?.opacity ?? Float(view.alphaValue)
@@ -340,7 +297,6 @@ private enum Motion {
         CATransaction.commit()
     }
 
-    /// Pieces rise into place one after another with a soft spring, fading in.
     static func reveal(_ views: [NSView], delay: CFTimeInterval, stagger: CFTimeInterval = 0.045) {
         let now = CACurrentMediaTime()
         for (i, view) in views.enumerated() {
