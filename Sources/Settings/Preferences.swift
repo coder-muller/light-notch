@@ -49,6 +49,11 @@ final class Preferences {
         set { set("scrollVolume", newValue) }
     }
 
+    var hideInFullScreen: Bool {
+        get { bool("hideInFullScreen", default: true) }
+        set { set("hideInFullScreen", newValue) }
+    }
+
     var showVolumeChanges: Bool {
         get { bool("showVolumeChanges", default: true) }
         set { set("showVolumeChanges", newValue) }

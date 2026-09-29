@@ -38,6 +38,7 @@ final class NotchController: NSObject, NSMenuDelegate {
     private let spotify: Spotify
     private let systemVolume = SystemVolume()
     private let devices = DeviceMonitor()
+    private lazy var fullScreen = FullScreenWatcher { [weak self] in self?.notchScreen }
     private var deviceShown = false
     private var deviceHide: DispatchWorkItem?
     private var devicePrefs: (Bool, Bool, Bool)?
@@ -109,6 +110,7 @@ final class NotchController: NSObject, NSMenuDelegate {
         systemVolume.onChange = { [weak self] in self?.syncOutputSilent() }
         systemVolume.onExternalChange = { [weak self] in self?.showVolumeChange($0) }
         devices.onEvent = { [weak self] in self?.showDevice($0) }
+        fullScreen.onChange = { [weak self] _ in self?.updateVisibility(animated: true) }
         syncDeviceMonitor()
         panel.contentView = root
         root.onClick = { [weak self] in self?.toggle() }
@@ -136,7 +138,7 @@ final class NotchController: NSObject, NSMenuDelegate {
     }
 
     private func layoutForScreen() {
-        guard let screen = NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 }) ?? NSScreen.main else { return }
+        guard let screen = notchScreen else { return }
         let frame = screen.frame
 
         if screen.safeAreaInsets.top > 0,
@@ -194,6 +196,8 @@ final class NotchController: NSObject, NSMenuDelegate {
         syncHoverRect()
         showContent(for: mode, animated: false)
         updateAudioTap()
+        fullScreen.scheduleCheck()
+        updateVisibility(animated: false)
     }
 
     private func setWindowFrame(_ frame: NSRect) {
@@ -332,6 +336,26 @@ final class NotchController: NSObject, NSMenuDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + Preferences.shared.volumeDelay, execute: work)
     }
 
+    private var notchScreen: NSScreen? {
+        NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 }) ?? NSScreen.main
+    }
+
+    private func updateVisibility(animated: Bool) {
+        let resting = mode == .notch || mode == .compact
+        let hide = Preferences.shared.hideInFullScreen && fullScreen.isFullScreen && resting
+        panel.ignoresMouseEvents = hide
+        let target: CGFloat = hide ? 0 : 1
+        guard panel.alphaValue != target else { return }
+        guard animated else {
+            panel.alphaValue = target
+            return
+        }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = hide ? 0.25 : 0.15
+            panel.animator().alphaValue = target
+        }
+    }
+
     private var deviceWidth: CGFloat { notchSize.width + 2 * CompactView.wingWidth + Metrics.deviceExtraWidth }
 
     private func syncDeviceMonitor() {
@@ -442,6 +466,7 @@ final class NotchController: NSObject, NSMenuDelegate {
     }
 
     private func preferencesChanged() {
+        updateVisibility(animated: true)
         syncOutputSilent()
         syncDeviceMonitor()
         compact?.update()
@@ -487,6 +512,7 @@ final class NotchController: NSObject, NSMenuDelegate {
         guard newMode != mode, let target = layouts[newMode], let current = layouts[mode] else { return }
         let oldMode = mode
         mode = newMode
+        updateVisibility(animated: true)
         generation &+= 1
         let token = generation
         let growing = target.frame.width >= current.frame.width && target.frame.height >= current.frame.height
