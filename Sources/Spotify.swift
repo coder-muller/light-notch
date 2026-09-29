@@ -8,6 +8,24 @@ struct NowPlaying: Equatable {
     var isPlaying: Bool
 }
 
+/// Posição na faixa, ancorada num instante: a posição atual é calculada, sem consultar o Spotify.
+struct PlaybackTiming: Equatable {
+    var duration: Double          // segundos
+    var position: Double          // segundos, no instante `stamp`
+    var stamp: CFTimeInterval     // CACurrentMediaTime()
+    var isPlaying: Bool
+
+    func position(at time: CFTimeInterval) -> Double {
+        min(duration, max(0, position + (isPlaying ? time - stamp : 0)))
+    }
+
+    /// Mesma posição atual, com outro estado de reprodução (re-ancorada agora).
+    func with(isPlaying playing: Bool) -> PlaybackTiming {
+        let now = CACurrentMediaTime()
+        return PlaybackTiming(duration: duration, position: position(at: now), stamp: now, isPlaying: playing)
+    }
+}
+
 // MARK: - Apple Events
 
 private let spotifyBundleID = "com.spotify.client"
@@ -68,9 +86,13 @@ private final class AppleEvents {
                         if i >= optionalFrom { values.append(""); continue }
                         return nil
                     }
-                    // Enumerações (player state) viram o próprio código de 4 letras.
-                    values.append(reply.descriptorType == typeEnumerated
-                                  ? String(fourCC: reply.enumCodeValue) : reply.stringValue ?? "")
+                    // Enumerações (player state) viram o próprio código de 4 letras; números, texto com ponto.
+                    switch reply.descriptorType {
+                    case typeEnumerated: values.append(String(fourCC: reply.enumCodeValue))
+                    case typeIEEE64BitFloatingPoint, typeIEEE32BitFloatingPoint, typeSInt32, typeSInt64:
+                        values.append(String(reply.doubleValue))
+                    default: values.append(reply.stringValue ?? "")
+                    }
                 }
                 return values
             }
@@ -78,15 +100,31 @@ private final class AppleEvents {
         }
     }
 
+    /// Define uma propriedade (ex. posição do player). Mesma política de descarte de `command`.
+    func set(_ specifier: NSAppleEventDescriptor, to value: NSAppleEventDescriptor) {
+        pendingLock.lock()
+        defer { pendingLock.unlock() }
+        guard pendingCommands < 1 else { return }
+        pendingCommands += 1
+        queue.async { [self] in
+            autoreleasepool { _ = try? send("core", "setd", object: specifier, data: value) }
+            pendingLock.lock()
+            pendingCommands -= 1
+            pendingLock.unlock()
+        }
+    }
+
     /// Só na `queue`. Mira o PID: se o Spotify fechou, falha em vez de abri-lo.
     private func send(_ eventClass: StaticString, _ eventID: StaticString,
-                      object: NSAppleEventDescriptor? = nil) throws -> NSAppleEventDescriptor? {
+                      object: NSAppleEventDescriptor? = nil,
+                      data: NSAppleEventDescriptor? = nil) throws -> NSAppleEventDescriptor? {
         guard let app = runningSpotify() else { throw CocoaError(.featureUnsupported) }
         let event = NSAppleEventDescriptor(
             eventClass: fourCC(eventClass), eventID: fourCC(eventID),
             targetDescriptor: NSAppleEventDescriptor(processIdentifier: app.processIdentifier),
             returnID: AEReturnID(kAutoGenerateReturnID), transactionID: AETransactionID(kAnyTransactionID))
         if let object { event.setParam(object, forKeyword: keyDirectObject) }
+        if let data { event.setParam(data, forKeyword: fourCC("data")) }
         // Timeout longo só até o 1º envio concluir (sucesso ou erro): ele pode esperar o usuário
         // responder o pedido de Automação. Depois, 3 s, para um Spotify travado não bloquear a fila.
         let timeout: TimeInterval = firstSendDone ? 3 : 60
@@ -118,6 +156,9 @@ private final class AppleEvents {
     static let playerState = property("pPlS")
     static let trackID = property("ID  ", of: track)
     static let artworkURL = property("aUrl", of: track)
+    static let playerPosition = property("pPos")
+    /// Em milissegundos.
+    static let duration = property("pDur", of: track)
     /// state, id, name, artist, album, artwork url
     static let snapshot = [playerState, trackID, property("pnam", of: track),
                            property("pArt", of: track), property("pAlb", of: track), artworkURL]
@@ -140,6 +181,8 @@ final class Spotify: NSObject {
     private(set) var artwork: CGImage?
     /// Chamado SEMPRE na main thread depois que nowPlaying ou artwork mudam.
     var onChange: (() -> Void)?
+    /// Duração e posição da faixa atual; nil quando desconhecidas ou nada toca.
+    private(set) var timing: PlaybackTiming?
     /// true se a última troca de faixa voltou para a faixa anterior (botão "anterior" ou histórico).
     /// As views usam para inverter o sentido da animação.
     private(set) var lastChangeWentBack = false
@@ -206,6 +249,7 @@ final class Spotify: NSObject {
         // O completion é assíncrono (main), então roda depois do toggle abaixo.
         guard accepted, let toggled else { return }
         nowPlaying?.isPlaying = toggled.isPlaying
+        timing = timing?.with(isPlaying: toggled.isPlaying)
         onChange?()
     }
 
@@ -217,6 +261,31 @@ final class Spotify: NSObject {
     func previousTrack() {
         previousRequestedAt = CFAbsoluteTimeGetCurrent()
         events.command("spfy", "Prev")
+    }
+
+    /// Pula para `seconds` na faixa atual. Atualiza a posição na hora (otimista).
+    func seek(to seconds: Double) {
+        guard var current = timing else { return }
+        current.position = min(max(0, seconds), current.duration)
+        current.stamp = CACurrentMediaTime()
+        timing = current
+        events.set(AppleEvents.playerPosition, to: NSAppleEventDescriptor(double: current.position))
+        onChange?()
+    }
+
+    /// Relê posição e duração do Spotify (ex. ao abrir o player: um seek feito no Spotify não gera aviso).
+    func refreshTiming() {
+        guard let trackID = nowPlaying?.trackID else { return }
+        let asked = CACurrentMediaTime()
+        events.get([AppleEvents.playerPosition, AppleEvents.duration]) { [weak self] v in
+            guard let self, let v, let np = self.nowPlaying, np.trackID == trackID,
+                  let position = Double(v[0]), let ms = Double(v[1]), ms > 0 else { return }
+            let new = PlaybackTiming(duration: ms / 1000, position: position, stamp: asked, isPlaying: np.isPlaying)
+            // Ignora diferenças mínimas (latência do Apple Event) para não mexer na barra à toa.
+            if let old = self.timing, abs(old.position(at: asked) - position) < 0.5, old.duration == new.duration { return }
+            self.timing = new
+            self.onChange?()
+        }
     }
 
     /// Registra a nova faixa no histórico e decide se a troca foi para trás.
@@ -246,8 +315,15 @@ final class Spotify: NSObject {
             artist: info["Artist"] as? String ?? "",
             album: info["Album"] as? String ?? "",
             isPlaying: state == "Playing")
+        // Duração em ms e posição em segundos, quando o aviso traz.
+        var newTiming: PlaybackTiming?
+        if let ms = (info["Duration"] as? NSNumber)?.doubleValue, ms > 0 {
+            let position = (info["Playback Position"] as? NSNumber)?.doubleValue ?? 0
+            newTiming = PlaybackTiming(duration: ms / 1000, position: position,
+                                       stamp: CACurrentMediaTime(), isPlaying: new.isPlaying)
+        }
         epoch &+= 1
-        update(new)
+        update(new, timing: newTiming)
     }
 
     @objc private func appTerminated(_ note: Notification) {
@@ -271,10 +347,21 @@ final class Spotify: NSObject {
 
     // MARK: Estado
 
-    private func update(_ new: NowPlaying) {
-        guard new != nowPlaying else { return }
+    private func update(_ new: NowPlaying, timing newTiming: PlaybackTiming?) {
         let trackChanged = new.trackID != nowPlaying?.trackID
+        let timingChanged = newTiming.map { t in
+            timing.map { $0.duration != t.duration || $0.isPlaying != t.isPlaying
+                || abs($0.position(at: t.stamp) - t.position) >= 0.5 } ?? true
+        } ?? false
+        guard new != nowPlaying || timingChanged else { return }
         nowPlaying = new
+        if let newTiming, timingChanged || trackChanged {
+            timing = newTiming
+        } else if trackChanged {
+            timing = nil
+        } else if let current = timing, current.isPlaying != new.isPlaying {
+            timing = current.with(isPlaying: new.isPlaying)
+        }
         if trackChanged {
             recordTrackChange(to: new.trackID)
             artworkTask?.cancel()
@@ -295,6 +382,7 @@ final class Spotify: NSObject {
         guard nowPlaying != nil || artwork != nil else { return }
         nowPlaying = nil
         artwork = nil
+        timing = nil
         onChange?()
     }
 
@@ -333,6 +421,7 @@ final class Spotify: NSObject {
             self.nowPlaying = np
             self.onChange?()
             self.loadArtwork(from: v[5], trackID: np.trackID)
+            self.refreshTiming()
         }
     }
 
