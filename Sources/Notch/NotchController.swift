@@ -100,6 +100,8 @@ final class NotchController: NSObject, NSMenuDelegate {
         }
         root.contextMenu = { [weak self] in self?.menu }
         root.onScroll = { [weak self] event in self?.scrolled(event) }
+        NotificationCenter.default.addObserver(forName: Preferences.didChange, object: nil,
+                                               queue: .main) { [weak self] _ in self?.preferencesChanged() }
         spotify.onChange = { [weak self] in self?.spotifyChanged() }
 
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
@@ -287,6 +289,14 @@ final class NotchController: NSObject, NSMenuDelegate {
     func menuDidClose(_ menu: NSMenu) { scheduleClose() }
 
     @objc private func openSettings() { settings.show() }
+
+    private func preferencesChanged() {
+        compact?.update()
+        player?.update()
+        compactMeter.setAccent(Accent.color(for: spotify.artwork), animated: true)
+        transition(to: desiredMode)
+        updateAudioTap()
+    }
 
     private func spotifyChanged() {
         player?.update()

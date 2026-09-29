@@ -5,7 +5,14 @@ enum Accent {
 
     private static var cached: (image: CGImage, color: CGColor)?
 
+    static let white = CGColor(gray: 1, alpha: 0.9)
+
     static func color(for image: CGImage?) -> CGColor {
+        switch Preferences.shared.accent {
+        case .spotify: return fallback
+        case .white: return white
+        case .cover: break
+        }
         guard let image else { return fallback }
         if let cached, cached.image === image { return cached.color }
         let color = extract(from: image)

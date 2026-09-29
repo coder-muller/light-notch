@@ -44,6 +44,7 @@ final class CompactView: NSView {
     private var barHeights = [CGFloat](repeating: CompactView.barMinHeight, count: CompactView.barCount)
 
     private var hasApplied = false
+    private var appliedAccent: CGColor?
     private var appliedArtwork: CGImage?
 
     init(spotify: Spotify) {
@@ -119,6 +120,15 @@ final class CompactView: NSView {
 
     func update() {
         let art = spotify.artwork
+        let accent = Accent.color(for: art)
+        if let applied = appliedAccent, applied != accent, art === appliedArtwork {
+            CATransaction.begin()
+            CATransaction.setAnimationDuration(0.4)
+            for bar in bars { bar.backgroundColor = accent }
+            statusIcon.backgroundColor = accent
+            CATransaction.commit()
+        }
+        appliedAccent = accent
         if !hasApplied || art !== appliedArtwork {
             let animate = hasApplied && !isHidden && window != nil
             let oldContents = coverLayer.contents, oldBackground = coverLayer.backgroundColor
@@ -128,7 +138,6 @@ final class CompactView: NSView {
             coverLayer.backgroundColor = art == nil ? CompactView.placeholderColor : nil
             CATransaction.commit()
 
-            let accent = Accent.color(for: art)
             if animate {
                 let back = spotify.lastChangeWentBack
                 TrackTransition.flipCover(coverLayer, from: oldContents, oldBackground: oldBackground, backwards: back)

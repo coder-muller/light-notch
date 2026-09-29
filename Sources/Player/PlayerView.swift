@@ -40,6 +40,7 @@ final class PlayerView: NSView {
     private var meterShown = false
     private var meterHide: DispatchWorkItem?
 
+    private var appliedAccent: CGColor?
     private var hasApplied = false
     private var appliedNowPlaying: NowPlaying?
     private var appliedArtwork: CGImage?
@@ -189,13 +190,11 @@ final class PlayerView: NSView {
         if !hasApplied || art !== appliedArtwork {
             if np != nil || !hasApplied {
                 applyArtwork(art, animate: visible && wasShowingSong)
-                let accent = Accent.color(for: art)
-                progress.setColor(accent, animated: visible && wasShowingSong)
-                meter.setAccent(accent, animated: visible && wasShowingSong)
-                shuffleButton.setAccent(accent, animated: visible && wasShowingSong)
-                repeatButton.setAccent(accent, animated: visible && wasShowingSong)
+                applyAccent(Accent.color(for: art), animated: visible && wasShowingSong)
             }
             appliedArtwork = art
+        } else if let applied = appliedAccent, applied != Accent.color(for: art) {
+            applyAccent(Accent.color(for: art), animated: visible)
         }
 
         if np != nil {
@@ -206,6 +205,14 @@ final class PlayerView: NSView {
 
         setShowingEmpty(np == nil, animated: visible)
         hasApplied = true
+    }
+
+    private func applyAccent(_ accent: CGColor, animated: Bool) {
+        appliedAccent = accent
+        progress.setColor(accent, animated: animated)
+        meter.setAccent(accent, animated: animated)
+        shuffleButton.setAccent(accent, animated: animated)
+        repeatButton.setAccent(accent, animated: animated)
     }
 
     private func setShowingEmpty(_ isEmpty: Bool, animated: Bool) {
