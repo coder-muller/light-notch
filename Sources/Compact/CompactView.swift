@@ -25,9 +25,20 @@ final class CompactView: NSView {
 
     private var active = true
     private var playing = false
-    private var muted = false
-    private let muteIcon = CALayer()
-    private let muteSymbol = CALayer()
+    private enum Status { case bars, muted, paused }
+    private static let pausedCoverOpacity: Float = 0.45
+    private var status = Status.bars
+    private var coverVisible = true
+    private let statusIcon = CALayer()
+    private let statusSymbol = CALayer()
+    private let statusImages: [Status: NSImage] = {
+        let config = NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
+        func image(_ name: String) -> NSImage {
+            NSImage(systemSymbolName: name, accessibilityDescription: nil)?.withSymbolConfiguration(config)
+                ?? NSImage(size: NSSize(width: 12, height: 12))
+        }
+        return [.muted: image("speaker.slash.fill"), .paused: image("pause.fill")]
+    }()
     private var animating = false
     private var live = false
     private var barHeights = [CGFloat](repeating: CompactView.barMinHeight, count: CompactView.barCount)
@@ -48,17 +59,16 @@ final class CompactView: NSView {
         coverLayer.backgroundColor = CompactView.placeholderColor
         coverLayer.contentsScale = currentScale
 
-        let config = NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
-        let slash = NSImage(systemSymbolName: "speaker.slash.fill", accessibilityDescription: nil)?
-            .withSymbolConfiguration(config)
-        muteSymbol.contents = slash
-        muteSymbol.contentsGravity = .resizeAspect
-        muteSymbol.contentsScale = currentScale
-        muteSymbol.frame = CGRect(origin: .zero, size: slash?.size ?? NSSize(width: 14, height: 12))
-        muteIcon.bounds = muteSymbol.frame
-        muteIcon.mask = muteSymbol
-        muteIcon.backgroundColor = Accent.fallback
-        muteIcon.opacity = 0
+        let iconSize = statusImages.values.reduce(CGSize.zero) {
+            CGSize(width: max($0.width, $1.size.width), height: max($0.height, $1.size.height))
+        }
+        statusSymbol.contentsGravity = .center
+        statusSymbol.contentsScale = currentScale
+        statusSymbol.frame = CGRect(origin: .zero, size: iconSize)
+        statusIcon.bounds = statusSymbol.frame
+        statusIcon.mask = statusSymbol
+        statusIcon.backgroundColor = Accent.fallback
+        statusIcon.opacity = 0
         layer?.addSublayer(coverLayer)
 
         for bar in bars {
@@ -97,7 +107,7 @@ final class CompactView: NSView {
             + CGFloat(CompactView.barCount - 1) * CompactView.barGap
         var x = width - CompactView.outerMargin - groupWidth
         let midY = snap(height / 2)
-        muteIcon.position = CGPoint(x: snap(x + groupWidth / 2), y: midY)
+        statusIcon.position = CGPoint(x: snap(x + groupWidth / 2), y: midY)
         for (i, bar) in bars.enumerated() {
             bar.bounds = CGRect(x: 0, y: 0, width: CompactView.barWidth, height: barHeights[i])
             bar.position = CGPoint(x: snap(x) + CompactView.barWidth / 2, y: midY)
@@ -125,35 +135,47 @@ final class CompactView: NSView {
                 TrackTransition.colorWave(bars, to: accent, backwards: back)
                 CATransaction.begin()
                 CATransaction.setAnimationDuration(0.5)
-                muteIcon.backgroundColor = accent
+                statusIcon.backgroundColor = accent
                 CATransaction.commit()
             } else {
                 CATransaction.begin()
                 CATransaction.setDisableActions(true)
                 for bar in bars { bar.backgroundColor = accent }
-                muteIcon.backgroundColor = accent
+                statusIcon.backgroundColor = accent
                 CATransaction.commit()
             }
             appliedArtwork = art
         }
 
         playing = spotify.nowPlaying?.isPlaying ?? false
-        setMuted(spotify.nowPlaying != nil && spotify.volume == 0, animated: hasApplied && !isHidden && window != nil)
+        let newStatus: Status = spotify.nowPlaying == nil ? .bars
+            : !playing ? .paused
+            : spotify.volume == 0 ? .muted : .bars
+        setStatus(newStatus, animated: hasApplied && !isHidden && window != nil)
         hasApplied = true
         syncAnimations()
     }
 
-    private func setMuted(_ on: Bool, animated: Bool) {
-        guard on != muted else { return }
-        muted = on
-        if muteIcon.superlayer == nil { layer?.addSublayer(muteIcon) }
+    private func setStatus(_ new: Status, animated: Bool) {
+        guard new != status else { return }
+        let old = status
+        status = new
+        if statusIcon.superlayer == nil { layer?.addSublayer(statusIcon) }
         syncAnimations()
+        applyCoverOpacity(animated: animated)
+
+        if old != .bars && new != .bars {
+            swapIcon(to: new, animated: animated)
+            return
+        }
+        let on = new != .bars
+        if on { setIconImage(new, animated: false) }
         VolumeMeter.fade(bars, to: on ? 0 : 1, duration: animated ? 0.2 : 0)
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        muteIcon.opacity = on ? 1 : 0
-        muteIcon.transform = on ? CATransform3DIdentity : CATransform3DMakeScale(0.6, 0.6, 1)
+        statusIcon.opacity = on ? 1 : 0
+        statusIcon.transform = on ? CATransform3DIdentity : CATransform3DMakeScale(0.6, 0.6, 1)
         CATransaction.commit()
         guard animated else { return }
 
@@ -164,7 +186,7 @@ final class CompactView: NSView {
         fade.duration = on ? 0.22 : 0.14
         fade.beginTime = CACurrentMediaTime() + delay
         fade.fillMode = .backwards
-        muteIcon.add(fade, forKey: "fade")
+        statusIcon.add(fade, forKey: "fade")
 
         let scale: CABasicAnimation
         if on {
@@ -181,7 +203,51 @@ final class CompactView: NSView {
         scale.toValue = on ? 1 : 0.6
         scale.beginTime = CACurrentMediaTime() + delay
         scale.fillMode = .backwards
-        muteIcon.add(scale, forKey: "scale")
+        statusIcon.add(scale, forKey: "scale")
+    }
+
+    private func swapIcon(to new: Status, animated: Bool) {
+        setIconImage(new, animated: animated)
+        guard animated else { return }
+        let dip = CAKeyframeAnimation(keyPath: "transform.scale")
+        dip.values = [1, 0.7, 1]
+        dip.keyTimes = [0, 0.45, 1]
+        dip.duration = 0.3
+        dip.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        statusIcon.add(dip, forKey: "scale")
+    }
+
+    private func setIconImage(_ status: Status, animated: Bool) {
+        if animated {
+            let fade = CATransition()
+            fade.type = .fade
+            fade.duration = 0.2
+            statusSymbol.add(fade, forKey: "contents")
+        }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        statusSymbol.contents = statusImages[status]
+        CATransaction.commit()
+    }
+
+    private var coverOpacity: Float {
+        guard coverVisible else { return 0 }
+        return status == .paused ? CompactView.pausedCoverOpacity : 1
+    }
+
+    private func applyCoverOpacity(animated: Bool) {
+        let from = coverLayer.presentation()?.opacity ?? coverLayer.opacity
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        coverLayer.opacity = coverOpacity
+        CATransaction.commit()
+        guard animated, from != coverOpacity else { return }
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = from
+        fade.toValue = coverOpacity
+        fade.duration = 0.3
+        fade.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        coverLayer.add(fade, forKey: "dim")
     }
 
     func setActive(_ active: Bool) {
@@ -194,7 +260,7 @@ final class CompactView: NSView {
     private static let rest = [CGFloat](repeating: CompactView.barMinHeight, count: CompactView.barCount)
 
     private func syncAnimations() {
-        let shouldAnimate = active && playing && !muted
+        let shouldAnimate = active && playing && status == .bars
         if live {
             if animating { stopAnimations(settle: false) }
             if !shouldAnimate { applyHeights(CompactView.rest, duration: CompactView.settleDuration) }
@@ -276,10 +342,9 @@ final class CompactView: NSView {
     var coverFrame: NSRect { coverLayer.frame }
 
     func setCoverVisible(_ visible: Bool) {
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        coverLayer.opacity = visible ? 1 : 0
-        CATransaction.commit()
+        coverVisible = visible
+        coverLayer.removeAnimation(forKey: "dim")
+        applyCoverOpacity(animated: false)
     }
 
     func bounce(dx: CGFloat, dy: CGFloat, animation: (CATransform3D) -> CAAnimation) {
@@ -294,7 +359,7 @@ final class CompactView: NSView {
         if animating || bars.first?.animation(forKey: CompactView.animationKey) != nil { stopAnimations(settle: false) }
 
         var targets = [CGFloat](repeating: CompactView.barMinHeight, count: CompactView.barCount)
-        if active && playing && !muted {
+        if active && playing && status == .bars {
             for i in 0..<CompactView.barCount {
                 let level = CGFloat(min(max(levels[i], 0), 1))
                 targets[i] = CompactView.barMinHeight
@@ -307,7 +372,7 @@ final class CompactView: NSView {
     func useSyntheticAnimation() {
         guard live else { return }
         live = false
-        if active && playing && !muted {
+        if active && playing && status == .bars {
             syncAnimations()
         } else {
             applyHeights(CompactView.rest, duration: CompactView.settleDuration)
