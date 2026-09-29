@@ -35,6 +35,10 @@ final class PlayerView: NSView {
     private let shuffleButton = ModeButton(kind: .shuffle)
     private let repeatButton = ModeButton(kind: .repeating)
     private let progress = ProgressBar(frame: NSRect(x: 0, y: 0, width: PlayerView.size.width, height: ProgressBar.height))
+    private let meter = VolumeMeter(frame: NSRect(x: 0, y: 0, width: PlayerView.size.width, height: 14),
+                                    iconSize: 11, barHeight: 6)
+    private var meterShown = false
+    private var meterHide: DispatchWorkItem?
 
     private var hasApplied = false
     private var appliedNowPlaying: NowPlaying?
@@ -53,6 +57,8 @@ final class PlayerView: NSView {
         setupButtons()
         progress.onSeek = { [weak self] seconds in self?.spotify.seek(to: seconds) }
         content.addSubview(progress)
+        meter.alphaValue = 0
+        content.addSubview(meter)
 
         update()
     }
@@ -185,6 +191,7 @@ final class PlayerView: NSView {
                 applyArtwork(art, animate: visible && wasShowingSong)
                 let accent = Accent.color(for: art)
                 progress.setColor(accent, animated: visible && wasShowingSong)
+                meter.setAccent(accent, animated: visible && wasShowingSong)
                 shuffleButton.setAccent(accent, animated: visible && wasShowingSong)
                 repeatButton.setAccent(accent, animated: visible && wasShowingSong)
             }
@@ -256,6 +263,33 @@ final class PlayerView: NSView {
             TrackTransition.flipCover(layer, from: oldContents, oldBackground: oldBackground,
                                       backwards: spotify.lastChangeWentBack)
         }
+    }
+
+    func showVolume(_ level: CGFloat) {
+        meter.setLevel(level, animated: meterShown)
+        if !meterShown {
+            meterShown = true
+            VolumeMeter.fade(meter, to: 1)
+            VolumeMeter.fade(progress, to: 0)
+        }
+        meterHide?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.hideVolume(animated: true) }
+        meterHide = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2, execute: work)
+    }
+
+    private func hideVolume(animated: Bool) {
+        meterHide?.cancel()
+        meterHide = nil
+        guard meterShown else { return }
+        meterShown = false
+        VolumeMeter.fade(meter, to: 0, duration: animated ? 0.25 : 0)
+        VolumeMeter.fade(progress, to: 1, duration: animated ? 0.25 : 0)
+    }
+
+    override func viewDidHide() {
+        super.viewDidHide()
+        hideVolume(animated: false)
     }
 
     override func viewDidChangeBackingProperties() {
