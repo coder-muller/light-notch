@@ -44,6 +44,8 @@ final class PlayerView: NSView {
     private let previousButton = TapButton(frame: .zero)
     private let playPauseButton = TapButton(frame: .zero)
     private let nextButton = TapButton(frame: .zero)
+    private let shuffleButton = ModeButton(kind: .shuffle)
+    private let repeatButton = ModeButton(kind: .repeating)
     private let progress = ProgressBar(frame: NSRect(x: 0, y: 0, width: PlayerView.size.width, height: ProgressBar.height))
 
     // Last applied state (avoids redundant work in update()).
@@ -124,13 +126,29 @@ final class PlayerView: NSView {
     }
 
     private func setupButtons() {
-        // Three buttons centered horizontally in the text column (play/pause exactly under the labels).
+        // Transport buttons centered horizontally in the text column (play/pause exactly under the labels),
+        // with shuffle and repeat at the outer ends of the row.
         let widths: [CGFloat] = [36, 40, 36]
         let gap: CGFloat = 12
+        let modeGap: CGFloat = 14
         let height: CGFloat = 28
         let total = widths.reduce(0, +) + gap * CGFloat(widths.count - 1)
         var x = PlayerView.textX + ((PlayerView.size.width - PlayerView.textX) - total) / 2
         x = x.rounded()
+
+        let modeWidth = ModeButton.size.width
+        shuffleButton.setFrameOrigin(NSPoint(x: x - modeGap - modeWidth, y: PlayerView.rowY))
+        repeatButton.setFrameOrigin(NSPoint(x: x + total + modeGap, y: PlayerView.rowY))
+        shuffleButton.onToggle = { [weak self] in
+            guard let self else { return }
+            self.spotify.setShuffling(!self.shuffleButton.isOn)
+        }
+        repeatButton.onToggle = { [weak self] in
+            guard let self else { return }
+            self.spotify.setRepeating(!self.repeatButton.isOn)
+        }
+        content.addSubview(shuffleButton)
+        content.addSubview(repeatButton)
 
         let buttons = [previousButton, playPauseButton, nextButton]
         for (button, width) in zip(buttons, widths) {
@@ -191,13 +209,20 @@ final class PlayerView: NSView {
             // Nothing playing: keep the last cover so it fades out with the rest.
             if np != nil || !hasApplied {
                 applyArtwork(art, animate: visible && wasShowingSong)
-                progress.setColor(Accent.color(for: art), animated: visible && wasShowingSong)
+                let accent = Accent.color(for: art)
+                progress.setColor(accent, animated: visible && wasShowingSong)
+                shuffleButton.setAccent(accent, animated: visible && wasShowingSong)
+                repeatButton.setAccent(accent, animated: visible && wasShowingSong)
             }
             appliedArtwork = art
         }
 
         // Nothing playing: the bar keeps its last state and fades out with the rest.
-        if np != nil { progress.setTiming(spotify.timing, animated: visible && wasShowingSong) }
+        if np != nil {
+            progress.setTiming(spotify.timing, animated: visible && wasShowingSong)
+            shuffleButton.setOn(spotify.shuffling ?? false, animated: visible && wasShowingSong)
+            repeatButton.setOn(spotify.repeating ?? false, animated: visible && wasShowingSong)
+        }
 
         setShowingEmpty(np == nil, animated: visible)
         hasApplied = true
@@ -211,7 +236,8 @@ final class PlayerView: NSView {
         let (outgoing, incoming): (NSView, NSView) = isEmpty ? (content, empty) : (empty, content)
         let pieces: [NSView] = isEmpty
             ? empty.pieces
-            : [cover, titleLabel, artistLabel, previousButton, playPauseButton, nextButton, progress]
+            : [cover, titleLabel, artistLabel, shuffleButton, previousButton, playPauseButton, nextButton,
+               repeatButton, progress]
 
         incoming.isHidden = false
         guard animated else {
