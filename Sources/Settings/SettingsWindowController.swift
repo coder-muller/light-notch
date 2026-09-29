@@ -108,8 +108,17 @@ final class SettingsWindowController: NSWindowController {
         ])
 
         accentPicker.onSelect = { [weak self] in self?.prefs.accent = $0 }
+        var equalizerControl: NSSegmentedControl?
         let equalizer = segmented(["Live", "Animated", "Off"], values: Preferences.Equalizer.allCases,
-                                  selected: prefs.equalizer) { [weak self] in self?.prefs.equalizer = $0 }
+                                  selected: prefs.equalizer) { [weak self] choice in
+            guard let self else { return }
+            if choice == .live, self.prefs.equalizer != .live, let control = equalizerControl {
+                self.confirmLiveEqualizer(control)
+            } else {
+                self.prefs.equalizer = choice
+            }
+        }
+        equalizerControl = equalizer
         group("Appearance", into: stack, rows: [
             row("paintpalette", "Accent color", "Equalizer, bars and icons", accentPicker),
             row("waveform", "Equalizer", "Live follows the music you hear", equalizer),
@@ -232,6 +241,24 @@ final class SettingsWindowController: NSWindowController {
         actions.append(action)
         control.target = action
         control.action = #selector(ControlAction.fire(_:))
+    }
+
+    private func confirmLiveEqualizer(_ control: NSSegmentedControl) {
+        let previous = prefs.equalizer
+        let alert = NSAlert()
+        alert.messageText = "Follow the music live?"
+        alert.informativeText = "The equalizer will listen to Spotify's audio and redraw about 30 times a second while music plays. That keeps a CPU core a little busy (around 3–4%) and uses more battery than the animation. macOS will also ask for audio recording access."
+        alert.addButton(withTitle: "Use Live")
+        alert.addButton(withTitle: "Cancel")
+        guard let window else { return }
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard let self else { return }
+            if response == .alertFirstButtonReturn {
+                self.prefs.equalizer = .live
+            } else {
+                control.selectedSegment = Preferences.Equalizer.allCases.firstIndex(of: previous) ?? 1
+            }
+        }
     }
 
     private func setOpenAtLogin(_ on: Bool) {
