@@ -12,10 +12,26 @@ While a song is playing, the notch stretches out to show the album cover on one 
 ## Requirements
 
 - macOS 14 or later on Apple silicon
-- Xcode Command Line Tools (`xcode-select --install`)
 - The Spotify desktop app
 
 ## Install
+
+Download `LightNotch-<version>.zip` from the [latest release](https://github.com/coder-muller/light-notch/releases/latest), unzip it and move `LightNotch.app` to `/Applications`.
+
+LightNotch isn't notarized by Apple, so macOS blocks it the first time you open it. To allow it:
+
+1. Open the app once and close the warning.
+2. Go to System Settings → Privacy & Security, scroll down and click **Open Anyway** next to LightNotch.
+
+Or remove the download flag from Terminal:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/LightNotch.app
+```
+
+### Build from source
+
+You'll need the Xcode Command Line Tools (`xcode-select --install`).
 
 ```bash
 git clone https://github.com/coder-muller/light-notch.git
