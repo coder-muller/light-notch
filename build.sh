@@ -11,13 +11,14 @@ APP="$BUILD_DIR/$NAME.app"
 INSTALL_PATH="/Applications/$NAME.app"
 
 build() {
-    local sources=("$ROOT"/Sources/*.swift)
-    if [[ ! -e "${sources[0]}" ]]; then
-        echo "erro: nenhum arquivo em $ROOT/Sources/*.swift" >&2
+    local sources=()
+    while IFS= read -r file; do sources+=("$file"); done < <(find "$ROOT/Sources" -name '*.swift' | sort)
+    if [[ ${#sources[@]} -eq 0 ]]; then
+        echo "erro: nenhum arquivo .swift em $ROOT/Sources" >&2
         exit 1
     fi
 
-    plutil -lint "$ROOT/Info.plist" >/dev/null
+    plutil -lint "$ROOT/Resources/Info.plist" >/dev/null
 
     rm -rf "$APP"
     mkdir -p "$APP/Contents/MacOS"
@@ -34,13 +35,13 @@ build() {
     # Precisa vir antes do codesign, pois strip invalida a assinatura.
     strip "$APP/Contents/MacOS/$NAME"
 
-    cp "$ROOT/Info.plist" "$APP/Contents/Info.plist"
+    cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
 
-    # Ícone gerado por código (Icon/make-icon.swift); só é refeito quando o script muda.
+    # Ícone gerado por código (scripts/make-icon.swift); só é refeito quando o script muda.
     local icon="$BUILD_DIR/AppIcon.icns"
-    if [[ ! -f "$icon" || "$ROOT/Icon/make-icon.swift" -nt "$icon" ]]; then
+    if [[ ! -f "$icon" || "$ROOT/scripts/make-icon.swift" -nt "$icon" ]]; then
         echo "==> Gerando ícone"
-        swift "$ROOT/Icon/make-icon.swift" "$icon"
+        swift "$ROOT/scripts/make-icon.swift" "$icon"
     fi
     mkdir -p "$APP/Contents/Resources"
     cp "$icon" "$APP/Contents/Resources/AppIcon.icns"
