@@ -17,6 +17,7 @@ private enum Metrics {
     static let volumeHideDelay: TimeInterval = 1.2
     static let peekRow: CGFloat = 46
     static let peekHideDelay: TimeInterval = 2.5
+    static let hoverOpenDelay: TimeInterval = 0.35
 }
 
 final class NotchController: NSObject, NSMenuDelegate {
@@ -55,6 +56,7 @@ final class NotchController: NSObject, NSMenuDelegate {
     private var generation = 0
     private var pendingClose: DispatchWorkItem?
     private var volumeRemainder: CGFloat = 0
+    private var hoverOpen: DispatchWorkItem?
     private var volumeShown = false
     private var peekShown = false
     private var peekHide: DispatchWorkItem?
@@ -94,7 +96,9 @@ final class NotchController: NSObject, NSMenuDelegate {
             if inside {
                 self.cancelClose()
                 self.bounce()
+                self.scheduleHoverOpen()
             } else {
+                self.hoverOpen?.cancel()
                 self.scheduleClose()
             }
         }
@@ -201,6 +205,7 @@ final class NotchController: NSObject, NSMenuDelegate {
 
     private func toggle() {
         cancelClose()
+        hoverOpen?.cancel()
         isOpen = mode != .expanded
         transition(to: desiredMode)
     }
@@ -262,6 +267,18 @@ final class NotchController: NSObject, NSMenuDelegate {
         }
         peekHide = work
         DispatchQueue.main.asyncAfter(deadline: .now() + Metrics.peekHideDelay, execute: work)
+    }
+
+    private func scheduleHoverOpen() {
+        hoverOpen?.cancel()
+        guard Preferences.shared.openOnHover, mode != .expanded else { return }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.mode != .expanded else { return }
+            self.isOpen = true
+            self.transition(to: self.desiredMode)
+        }
+        hoverOpen = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Metrics.hoverOpenDelay, execute: work)
     }
 
     private func cancelClose() {

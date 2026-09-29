@@ -64,6 +64,9 @@ final class SettingsWindowController: NSWindowController {
         checkbox("Keep showing the track while paused", on: prefs.keepWhilePaused) { [weak self] in
             self?.prefs.keepWhilePaused = $0
         }
+        checkbox("Open the player when hovering over the notch", on: prefs.openOnHover) { [weak self] in
+            self?.prefs.openOnHover = $0
+        }
     }
 
     func section(_ title: String) {
