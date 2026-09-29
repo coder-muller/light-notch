@@ -30,7 +30,8 @@ final class SettingsWindowController: NSWindowController {
         stack.translatesAutoresizingMaskIntoConstraints = false
         build(into: stack)
 
-        let content = NSView()
+        let content = FlippedView()
+        content.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(stack)
         NSLayoutConstraint.activate([
             stack.topAnchor.constraint(equalTo: content.topAnchor),
@@ -42,7 +43,17 @@ final class SettingsWindowController: NSWindowController {
         for view in stack.arrangedSubviews {
             view.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -40).isActive = true
         }
-        window.contentView = content
+        let scroll = NSScrollView()
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.automaticallyAdjustsContentInsets = false
+        scroll.documentView = content
+        content.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor).isActive = true
+        window.contentView = scroll
+        let visible = NSScreen.main?.visibleFrame.height ?? 900
+        window.setContentSize(NSSize(width: SettingsWindowController.width,
+                                     height: min(content.fittingSize.height, visible - 60)))
 
         NotificationCenter.default.addObserver(forName: Preferences.didChange, object: nil, queue: .main) { [weak self] _ in
             self?.refreshPreview(animated: true)
@@ -233,6 +244,10 @@ final class SettingsWindowController: NSWindowController {
         if service.status == .requiresApproval { SMAppService.openSystemSettingsLoginItems() }
         loginSwitch?.state = service.status == .enabled ? .on : .off
     }
+}
+
+private final class FlippedView: NSView {
+    override var isFlipped: Bool { true }
 }
 
 private final class BadgeView: NSView {
