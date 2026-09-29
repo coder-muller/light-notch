@@ -44,6 +44,7 @@ final class CompactView: NSView {
     private var barHeights = [CGFloat](repeating: CompactView.barMinHeight, count: CompactView.barCount)
 
     private var hasApplied = false
+    private var outputSilent = false
     private var barsEnabled = true
     private var barsMoving: Bool { active && playing && status == .bars && barsEnabled }
     private var appliedAccent: CGColor?
@@ -162,7 +163,7 @@ final class CompactView: NSView {
         setBarsEnabled(Preferences.shared.equalizer != .hidden, animated: hasApplied && !isHidden && window != nil)
         let newStatus: Status = spotify.nowPlaying == nil ? .bars
             : !playing ? .paused
-            : spotify.volume == 0 ? .muted : .bars
+            : outputSilent ? .muted : .bars
         setStatus(newStatus, animated: hasApplied && !isHidden && window != nil)
         hasApplied = true
         syncAnimations()
@@ -268,6 +269,12 @@ final class CompactView: NSView {
         fade.duration = 0.3
         fade.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
         coverLayer.add(fade, forKey: "dim")
+    }
+
+    func setOutputSilent(_ silent: Bool) {
+        guard silent != outputSilent else { return }
+        outputSilent = silent
+        update()
     }
 
     func setActive(_ active: Bool) {

@@ -31,6 +31,7 @@ final class NotchController: NSObject, NSMenuDelegate {
     }
 
     private let spotify: Spotify
+    private let systemVolume = SystemVolume()
     private let panel = NotchPanel()
     private let root = NotchRootView(frame: .zero)
     private var player: PlayerView?
@@ -87,6 +88,7 @@ final class NotchController: NSObject, NSMenuDelegate {
     init(spotify: Spotify) {
         self.spotify = spotify
         super.init()
+        systemVolume.onChange = { [weak self] in self?.syncOutputSilent() }
         panel.contentView = root
         root.onClick = { [weak self] in self?.toggle() }
         root.onHoverChange = { [weak self] inside in
@@ -211,8 +213,9 @@ final class NotchController: NSObject, NSMenuDelegate {
     private func scrolled(_ event: NSEvent) {
         guard Preferences.shared.scrollVolume, mode != .notch, spotify.nowPlaying != nil,
               event.momentumPhase.isEmpty else { return }
-        guard let volume = spotify.volume else {
-            spotify.refreshVolume()
+        let useSystem = Preferences.shared.volumeSource == .system
+        guard let volume = useSystem ? systemVolume.level : spotify.volume else {
+            if !useSystem { spotify.refreshVolume() }
             return
         }
         let dy = event.isDirectionInvertedFromDevice ? -event.scrollingDeltaY : event.scrollingDeltaY
@@ -221,7 +224,9 @@ final class NotchController: NSObject, NSMenuDelegate {
         guard step != 0 else { return }
         volumeRemainder -= step
         let target = min(100, max(0, volume + Int(step)))
-        if target != volume { spotify.setVolume(target) }
+        if target != volume || (useSystem && systemVolume.isMuted && step > 0) {
+            if useSystem { systemVolume.setLevel(target) } else { spotify.setVolume(target) }
+        }
         let level = CGFloat(target) / 100
         if mode == .expanded {
             player?.showVolume(level)
@@ -310,7 +315,13 @@ final class NotchController: NSObject, NSMenuDelegate {
         settings.show()
     }
 
+    private func syncOutputSilent() {
+        let silent = Preferences.shared.volumeSource == .system ? systemVolume.isSilent : spotify.volume == 0
+        compact?.setOutputSilent(silent)
+    }
+
     private func preferencesChanged() {
+        syncOutputSilent()
         compact?.update()
         player?.update()
         compactMeter.setAccent(Accent.color(for: spotify.artwork), animated: true)
@@ -322,6 +333,7 @@ final class NotchController: NSObject, NSMenuDelegate {
         player?.update()
         compact?.update()
         settings?.refresh()
+        syncOutputSilent()
         notePeek()
         transition(to: desiredMode)
         updateAudioTap()
@@ -528,6 +540,7 @@ final class NotchController: NSObject, NSMenuDelegate {
         compact.alphaValue = 0
         root.content.addSubview(compact)
         self.compact = compact
+        syncOutputSilent()
         setWindowFrame(panel.frame)
         return compact
     }
