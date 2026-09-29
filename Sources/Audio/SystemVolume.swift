@@ -3,6 +3,10 @@ import CoreAudio
 
 final class SystemVolume {
     var onChange: (() -> Void)?
+    var onExternalChange: ((Int) -> Void)?
+
+    private var ownChangeUntil: CFAbsoluteTime = 0
+    private var lastShownLevel: Int?
 
     private var device = AudioObjectID(kAudioObjectUnknown)
     private var deviceListener: AudioObjectPropertyListenerBlock?
@@ -58,6 +62,8 @@ final class SystemVolume {
 
     func setLevel(_ level: Int) {
         guard device != kAudioObjectUnknown else { return }
+        ownChangeUntil = CFAbsoluteTimeGetCurrent() + 0.4
+        lastShownLevel = min(100, max(0, level))
         var value = Float32(min(100, max(0, level))) / 100
         AudioObjectSetPropertyData(device, &SystemVolume.volumeAddress, 0, nil,
                                    UInt32(MemoryLayout<Float32>.size), &value)
@@ -74,13 +80,23 @@ final class SystemVolume {
         AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &SystemVolume.defaultDeviceAddress,
                                    0, nil, &size, &id)
         device = id
+        lastShownLevel = shownLevel
         if device != kAudioObjectUnknown {
-            let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in self?.onChange?() }
+            let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in self?.valueChanged() }
             valueListener = listener
             AudioObjectAddPropertyListenerBlock(device, &SystemVolume.volumeAddress, .main, listener)
             AudioObjectAddPropertyListenerBlock(device, &SystemVolume.muteAddress, .main, listener)
         }
         onChange?()
+    }
+
+    private var shownLevel: Int? { level.map { isMuted ? 0 : $0 } }
+
+    private func valueChanged() {
+        onChange?()
+        guard let shown = shownLevel, shown != lastShownLevel else { return }
+        lastShownLevel = shown
+        if CFAbsoluteTimeGetCurrent() > ownChangeUntil { onExternalChange?(shown) }
     }
 
     private func detach() {
