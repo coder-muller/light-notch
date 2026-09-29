@@ -6,6 +6,7 @@ final class DeviceNoticeView: NSView {
     private let icon = NSImageView()
     private let titleLabel = NSTextField(labelWithString: "")
     private let detailLabel = NSTextField(labelWithString: "")
+    private let pool = (0..<3).map { _ in BatteryRing() }
     private var rings: [BatteryRing] = []
 
     override init(frame: NSRect) {
@@ -27,40 +28,44 @@ final class DeviceNoticeView: NSView {
             label.wantsLayer = true
             addSubview(label)
         }
+        for ring in pool {
+            ring.isHidden = true
+            addSubview(ring)
+        }
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     func show(_ event: DeviceMonitor.Event) {
-        rings.forEach { $0.removeFromSuperview() }
-        rings.removeAll()
-
+        var parts: [(BatteryRing.Center, BatteryPart, Int)] = []
         switch event {
         case .connected(let accessory):
             setIcon(DeviceNoticeView.symbol(for: accessory))
             titleLabel.stringValue = accessory.name
             detailLabel.stringValue = "Connected"
             let warn = accessory.lowWarnLevel
-            if let left = accessory.left { rings.append(BatteryRing(label: "L", part: left, warnLevel: warn)) }
-            if let right = accessory.right { rings.append(BatteryRing(label: "R", part: right, warnLevel: warn)) }
-            if let single = accessory.single { rings.append(BatteryRing(label: nil, part: single, warnLevel: warn)) }
-            if let batteryCase = accessory.batteryCase {
-                rings.append(BatteryRing(symbol: "rectangle.portrait.fill", part: batteryCase, warnLevel: warn))
-            }
+            if let left = accessory.left { parts.append((.text("L"), left, warn)) }
+            if let right = accessory.right { parts.append((.text("R"), right, warn)) }
+            if let single = accessory.single { parts.append((.none, single, warn)) }
+            if let batteryCase = accessory.batteryCase { parts.append((.symbol("rectangle.portrait.fill"), batteryCase, warn)) }
         case .lowBattery(let accessory):
             setIcon(DeviceNoticeView.symbol(for: accessory))
             titleLabel.stringValue = accessory.name
             detailLabel.stringValue = "Low battery"
-            let level = accessory.lowestLevel ?? 0
-            rings.append(BatteryRing(label: nil, part: BatteryPart(level: level, charging: false), warnLevel: 100))
+            parts.append((.none, BatteryPart(level: accessory.lowestLevel ?? 0, charging: false), 100))
         case .charging(let mac):
             setIcon("laptopcomputer")
             titleLabel.stringValue = "Charging"
             detailLabel.stringValue = "\(mac.level)% · MacBook"
-            rings.append(BatteryRing(symbol: "bolt.fill", part: BatteryPart(level: mac.level, charging: true), warnLevel: 0))
+            parts.append((.symbol("bolt.fill"), BatteryPart(level: mac.level, charging: true), 0))
         }
-        rings.forEach { addSubview($0) }
+        parts = Array(parts.prefix(pool.count))
+        for (i, ring) in pool.enumerated() {
+            ring.isHidden = i >= parts.count
+            if i < parts.count { ring.configure(center: parts[i].0, part: parts[i].1, warnLevel: parts[i].2) }
+        }
+        rings = Array(pool.prefix(parts.count))
         layoutContent()
         animateIn()
     }
@@ -121,32 +126,24 @@ final class DeviceNoticeView: NSView {
 }
 
 private final class BatteryRing: NSView {
+    enum Center: Equatable { case none, text(String), symbol(String) }
+
     static let size = NSSize(width: 30, height: 40)
 
     private let track = CAShapeLayer()
     private let progress = CAShapeLayer()
-    private let level: CGFloat
     private let percent = NSTextField(labelWithString: "")
+    private let centerLabel = NSTextField(labelWithString: "")
+    private let centerIcon = NSImageView()
+    private var level: CGFloat = 0
 
-    convenience init(label: String?, part: BatteryPart, warnLevel: Int) {
-        self.init(part: part, warnLevel: warnLevel)
-        if let label { addCenter(text: label) }
-    }
-
-    convenience init(symbol: String, part: BatteryPart, warnLevel: Int) {
-        self.init(part: part, warnLevel: warnLevel)
-        addCenter(symbol: symbol)
-    }
-
-    private init(part: BatteryPart, warnLevel: Int) {
-        level = CGFloat(min(100, max(0, part.level))) / 100
+    init() {
         super.init(frame: NSRect(origin: .zero, size: BatteryRing.size))
         wantsLayer = true
         let diameter: CGFloat = 24
-        let rect = CGRect(x: (BatteryRing.size.width - diameter) / 2, y: BatteryRing.size.height - diameter - 1,
-                          width: diameter, height: diameter)
+        let center = ringCenter
         let path = CGMutablePath()
-        path.addArc(center: CGPoint(x: rect.midX, y: rect.midY), radius: diameter / 2 - 1.5,
+        path.addArc(center: center, radius: diameter / 2 - 1.5,
                     startAngle: .pi / 2, endAngle: .pi / 2 - 2 * .pi, clockwise: true)
         for shape in [track, progress] {
             shape.path = path
@@ -156,16 +153,22 @@ private final class BatteryRing: NSView {
             layer?.addSublayer(shape)
         }
         track.strokeColor = CGColor(gray: 1, alpha: 0.16)
-        let low = part.level <= warnLevel && !part.charging
-        progress.strokeColor = low ? NSColor.systemRed.cgColor : NSColor.systemGreen.cgColor
-        progress.strokeEnd = level
 
-        percent.stringValue = "\(part.level)%"
         percent.font = .monospacedDigitSystemFont(ofSize: 9, weight: .semibold)
         percent.textColor = NSColor(white: 1, alpha: 0.7)
         percent.alignment = .center
         percent.frame = NSRect(x: 0, y: 0, width: BatteryRing.size.width, height: 11)
         addSubview(percent)
+
+        centerLabel.font = .systemFont(ofSize: 9, weight: .bold)
+        centerLabel.textColor = .white
+        centerLabel.alignment = .center
+        centerLabel.frame = NSRect(x: center.x - 8, y: center.y - 6, width: 16, height: 12)
+        addSubview(centerLabel)
+
+        centerIcon.contentTintColor = .white
+        centerIcon.frame = NSRect(x: center.x - 6, y: center.y - 6, width: 12, height: 12)
+        addSubview(centerIcon)
     }
 
     @available(*, unavailable)
@@ -173,23 +176,30 @@ private final class BatteryRing: NSView {
 
     private var ringCenter: CGPoint { CGPoint(x: BatteryRing.size.width / 2, y: BatteryRing.size.height - 13) }
 
-    private func addCenter(text: String) {
-        let label = NSTextField(labelWithString: text)
-        label.font = .systemFont(ofSize: 9, weight: .bold)
-        label.textColor = .white
-        label.alignment = .center
-        label.sizeToFit()
-        label.frame.origin = CGPoint(x: ringCenter.x - label.frame.width / 2, y: ringCenter.y - label.frame.height / 2)
-        addSubview(label)
-    }
+    func configure(center: Center, part: BatteryPart, warnLevel: Int) {
+        level = CGFloat(min(100, max(0, part.level))) / 100
+        let low = part.level <= warnLevel && !part.charging
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        progress.strokeColor = low ? NSColor.systemRed.cgColor : NSColor.systemGreen.cgColor
+        progress.strokeEnd = level
+        CATransaction.commit()
+        percent.stringValue = "\(part.level)%"
 
-    private func addCenter(symbol: String) {
-        let config = NSImage.SymbolConfiguration(pointSize: 8, weight: .bold)
-        let view = NSImageView(image: NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
-            .withSymbolConfiguration(config) ?? NSImage())
-        view.contentTintColor = .white
-        view.frame = NSRect(x: ringCenter.x - 6, y: ringCenter.y - 6, width: 12, height: 12)
-        addSubview(view)
+        switch center {
+        case .none:
+            centerLabel.isHidden = true
+            centerIcon.isHidden = true
+        case .text(let text):
+            centerLabel.stringValue = text
+            centerLabel.isHidden = false
+            centerIcon.isHidden = true
+        case .symbol(let name):
+            centerIcon.image = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
+                .withSymbolConfiguration(.init(pointSize: 8, weight: .bold))
+            centerIcon.isHidden = false
+            centerLabel.isHidden = true
+        }
     }
 
     func fill(delay: CFTimeInterval) {
