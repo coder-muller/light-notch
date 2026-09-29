@@ -47,8 +47,10 @@ tccutil reset AppleEvents com.guilherme.lightnotch
 ## Usage
 
 - Click the notch to open the player. It closes on its own when the mouse leaves.
-- Right-click the notch and choose **Quit LightNotch** to quit.
-- To start it at login, add it in System Settings → General → Login Items.
+- Scroll over the notch to change the volume.
+- Right-click the notch for **Settings…** and **Quit LightNotch**.
+
+In Settings you can open LightNotch at login, pick the accent color (album cover, Spotify green or white), choose how the equalizer behaves, turn individual effects on or off, open the player on hover, and set how long notices stay on screen.
 
 ## How it works
 
