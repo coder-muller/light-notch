@@ -40,7 +40,13 @@ final class SettingsWindowController: NSWindowController {
         window.makeKeyAndOrderFront(nil)
     }
 
-    private func build() {}
+    private func build() {
+        section("Appearance")
+        popup("Accent color:", items: [("Album cover", "cover"), ("Spotify green", "spotify"), ("White", "white")],
+              selected: prefs.accent.rawValue) { [weak self] in
+            self?.prefs.accent = Preferences.AccentSource(rawValue: $0) ?? .cover
+        }
+    }
 
     func section(_ title: String) {
         let label = NSTextField(labelWithString: title)
