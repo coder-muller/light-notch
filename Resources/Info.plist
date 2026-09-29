@@ -27,9 +27,9 @@
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSAppleEventsUsageDescription</key>
-	<string>O LightNotch controla o Spotify (tocar/pausar, próxima, anterior) e lê a música atual.</string>
+	<string>LightNotch controls Spotify (play/pause, next, previous) and reads the current track.</string>
 	<key>NSAudioCaptureUsageDescription</key>
-	<string>O LightNotch lê o áudio do Spotify para animar o equalizador no notch. Nada é gravado.</string>
+	<string>LightNotch reads Spotify audio levels to animate the equalizer in the notch. Nothing is recorded.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSPrincipalClass</key>

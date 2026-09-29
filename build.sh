@@ -12,7 +12,7 @@ build() {
     local sources=()
     while IFS= read -r file; do sources+=("$file"); done < <(find "$ROOT/Sources" -name '*.swift' | sort)
     if [[ ${#sources[@]} -eq 0 ]]; then
-        echo "erro: nenhum arquivo .swift em $ROOT/Sources" >&2
+        echo "error: no .swift files in $ROOT/Sources" >&2
         exit 1
     fi
 
@@ -21,7 +21,7 @@ build() {
     rm -rf "$APP"
     mkdir -p "$APP/Contents/MacOS"
 
-    echo "==> Compilando ${#sources[@]} arquivo(s) Swift"
+    echo "==> Compiling ${#sources[@]} Swift files"
     swiftc -O -wmo \
         -swift-version 5 \
         -target arm64-apple-macos14.0 \
@@ -35,13 +35,13 @@ build() {
 
     local icon="$BUILD_DIR/AppIcon.icns"
     if [[ ! -f "$icon" || "$ROOT/scripts/make-icon.swift" -nt "$icon" ]]; then
-        echo "==> Gerando ícone"
+        echo "==> Generating icon"
         swift "$ROOT/scripts/make-icon.swift" "$icon"
     fi
     mkdir -p "$APP/Contents/Resources"
     cp "$icon" "$APP/Contents/Resources/AppIcon.icns"
 
-    echo "==> Assinando (ad-hoc, requisito designado fixo)"
+    echo "==> Signing (ad-hoc, fixed designated requirement)"
     codesign --force --sign - \
         -r="designated => identifier \"$BUNDLE_ID\"" \
         "$APP"
@@ -50,8 +50,8 @@ build() {
 
     local bytes
     bytes=$(stat -f%z "$APP/Contents/MacOS/$NAME")
-    echo "==> Pronto: $APP"
-    echo "    binário: $(( (bytes + 512) / 1024 )) KB ($bytes bytes)"
+    echo "==> Built $APP"
+    echo "    binary: $(( (bytes + 512) / 1024 )) KB ($bytes bytes)"
 }
 
 quit_app() {
@@ -74,14 +74,14 @@ case "${1:-build}" in
         rm -rf "$INSTALL_PATH"
         ditto "$APP" "$INSTALL_PATH"
         open "$INSTALL_PATH"
-        echo "==> Instalado em $INSTALL_PATH"
+        echo "==> Installed to $INSTALL_PATH"
         ;;
     clean)
         rm -rf "$BUILD_DIR"
-        echo "==> build/ removido"
+        echo "==> Removed build/"
         ;;
     *)
-        echo "uso: $0 [build|run|install|clean]" >&2
+        echo "usage: $0 [build|run|install|clean]" >&2
         exit 2
         ;;
 esac

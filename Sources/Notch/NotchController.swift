@@ -31,7 +31,7 @@ final class NotchController: NSObject, NSMenuDelegate {
     private lazy var menu: NSMenu = {
         let menu = NSMenu()
         menu.delegate = self
-        menu.addItem(withTitle: "Sair do LightNotch", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
+        menu.addItem(withTitle: "Quit LightNotch", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
         return menu
     }()
 

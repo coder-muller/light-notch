@@ -51,7 +51,7 @@ final class ModeButton: NSView {
 
         setAccessibilityElement(true)
         setAccessibilityRole(.checkBox)
-        setAccessibilityLabel(kind == .shuffle ? "Aleatório" : "Repetir")
+        setAccessibilityLabel(kind == .shuffle ? "Shuffle" : "Repeat")
         setAccessibilityValue(false)
 
         addTrackingArea(NSTrackingArea(rect: .zero,

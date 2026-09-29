@@ -80,7 +80,7 @@ final class PlayerView: NSView {
         cover.addSubview(placeholder)
         cover.installHoverOverlay()
         cover.onClick = { Spotify.open() }
-        cover.setAccessibilityLabel("Abrir o Spotify")
+        cover.setAccessibilityLabel("Open Spotify")
         content.addSubview(cover)
     }
 
@@ -150,15 +150,15 @@ final class PlayerView: NSView {
 
         previousButton.image = PlayerView.previousImage
         previousButton.action = #selector(previousTapped)
-        previousButton.setAccessibilityLabel("Faixa anterior")
+        previousButton.setAccessibilityLabel("Previous track")
 
         playPauseButton.image = PlayerView.playImage
         playPauseButton.action = #selector(playPauseTapped)
-        playPauseButton.setAccessibilityLabel("Reproduzir")
+        playPauseButton.setAccessibilityLabel("Play")
 
         nextButton.image = PlayerView.nextImage
         nextButton.action = #selector(nextTapped)
-        nextButton.setAccessibilityLabel("Próxima faixa")
+        nextButton.setAccessibilityLabel("Next track")
     }
 
     var coverFrame: NSRect { cover.convert(cover.bounds, to: self) }
@@ -241,7 +241,7 @@ final class PlayerView: NSView {
         let playing = np.isPlaying
         if previous == nil || playing != previous?.isPlaying {
             playPauseButton.image = playing ? PlayerView.pauseImage : PlayerView.playImage
-            playPauseButton.setAccessibilityLabel(playing ? "Pausar" : "Reproduzir")
+            playPauseButton.setAccessibilityLabel(playing ? "Pause" : "Play")
         }
     }
 

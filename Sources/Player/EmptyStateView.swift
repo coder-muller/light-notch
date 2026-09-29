@@ -5,7 +5,7 @@ final class EmptyStateView: NSView {
 
     private let badge = NSView()
     private let text = NSView()
-    private let openButton = PillButton(title: "Abrir Spotify")
+    private let openButton = PillButton(title: "Open Spotify")
 
     var pieces: [NSView] { Spotify.appURL == nil ? [badge, text] : [badge, text, openButton] }
 
@@ -24,8 +24,8 @@ final class EmptyStateView: NSView {
         note.contentTintColor = EmptyStateView.green
         badge.addSubview(note)
 
-        let title = label("Nada tocando", .systemFont(ofSize: 14, weight: .semibold), .white)
-        let subtitle = label("Dê play no Spotify",
+        let title = label("Nothing playing", .systemFont(ofSize: 14, weight: .semibold), .white)
+        let subtitle = label("Play something on Spotify",
                              .systemFont(ofSize: 12, weight: .medium), NSColor(white: 1, alpha: 0.5))
         let textWidth = max(title.frame.width, subtitle.frame.width)
         let lineGap: CGFloat = 2

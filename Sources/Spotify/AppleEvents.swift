@@ -94,7 +94,7 @@ final class AppleEvents {
         } catch {
             if (error as NSError).code == -1743, !loggedDenied {
                 loggedDenied = true
-                NSLog("LightNotch: Automação do Spotify negada. Autorize em Ajustes > Privacidade e Segurança > Automação.")
+                NSLog("LightNotch: Automation access to Spotify was denied. Allow it in System Settings > Privacy & Security > Automation.")
             }
             throw error
         }
