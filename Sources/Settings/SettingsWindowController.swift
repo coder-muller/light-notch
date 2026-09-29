@@ -125,13 +125,24 @@ final class SettingsWindowController: NSWindowController {
                 toggle(on: prefs.openOnHover) { [weak self] in self?.prefs.openOnHover = $0 }),
             row("timer", "Notice duration", "How long notices stay on screen", duration),
         ])
+
+        group("Devices", badge: "BETA", into: stack, rows: [
+            row("airpodspro", "Connected devices", "AirPods and headphones with their battery",
+                toggle(on: prefs.deviceConnect) { [weak self] in self?.prefs.deviceConnect = $0 }),
+            row("battery.25percent", "Low battery", "Warn when an accessory runs low",
+                toggle(on: prefs.deviceLowBattery) { [weak self] in self?.prefs.deviceLowBattery = $0 }),
+            row("powerplug", "Mac charging", "Show the battery when you plug in",
+                toggle(on: prefs.macCharging) { [weak self] in self?.prefs.macCharging = $0 }),
+        ])
     }
 
-    private func group(_ title: String, into stack: NSStackView, rows: [NSView]) {
+    private func group(_ title: String, badge: String? = nil, into stack: NSStackView, rows: [NSView]) {
         let caption = NSTextField(labelWithString: title)
         caption.font = .systemFont(ofSize: 12, weight: .semibold)
         caption.textColor = .secondaryLabelColor
         let captionRow = NSStackView(views: [caption])
+        captionRow.spacing = 6
+        if let badge { captionRow.addArrangedSubview(BadgeView(text: badge)) }
         captionRow.edgeInsets = NSEdgeInsets(top: 0, left: 12, bottom: 0, right: 0)
         stack.addArrangedSubview(captionRow)
         stack.setCustomSpacing(7, after: captionRow)
@@ -221,6 +232,41 @@ final class SettingsWindowController: NSWindowController {
         }
         if service.status == .requiresApproval { SMAppService.openSystemSettingsLoginItems() }
         loginSwitch?.state = service.status == .enabled ? .on : .off
+    }
+}
+
+private final class BadgeView: NSView {
+    private let label: NSTextField
+
+    init(text: String) {
+        label = NSTextField(labelWithString: text)
+        super.init(frame: .zero)
+        wantsLayer = true
+        label.font = .systemFont(ofSize: 9, weight: .bold)
+        label.textColor = .controlAccentColor
+        label.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
+            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
+            label.topAnchor.constraint(equalTo: topAnchor, constant: 2),
+            label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -2),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override var wantsUpdateLayer: Bool { true }
+
+    override func updateLayer() {
+        layer?.cornerRadius = bounds.height / 2
+        layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.15).cgColor
+    }
+
+    override func layout() {
+        super.layout()
+        layer?.cornerRadius = bounds.height / 2
     }
 }
 

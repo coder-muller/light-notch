@@ -39,6 +39,7 @@ final class NotchController: NSObject, NSMenuDelegate {
     private let devices = DeviceMonitor()
     private var deviceShown = false
     private var deviceHide: DispatchWorkItem?
+    private var devicePrefs: (Bool, Bool, Bool)?
     private let deviceNotice: DeviceNoticeView = {
         let notice = DeviceNoticeView(frame: .zero)
         notice.alphaValue = 0
@@ -277,7 +278,19 @@ final class NotchController: NSObject, NSMenuDelegate {
     private var deviceWidth: CGFloat { notchSize.width + 2 * CompactView.wingWidth + Metrics.deviceExtraWidth }
 
     private func syncDeviceMonitor() {
-        if Preferences.shared.watchesDevices { devices.start() } else { devices.stop() }
+        let prefs = Preferences.shared
+        let current = (prefs.deviceConnect, prefs.deviceLowBattery, prefs.macCharging)
+        defer { devicePrefs = current }
+        if prefs.watchesDevices { devices.start() } else { devices.stop() }
+        guard let previous = devicePrefs else { return }
+        let snapshot = PowerSources.snapshot()
+        if current.0 && !previous.0, let audio = snapshot.accessories.first(where: \.isAudio) {
+            showDevice(.connected(audio))
+        } else if current.1 && !previous.1, let accessory = snapshot.accessories.first(where: { $0.lowestLevel != nil }) {
+            showDevice(.lowBattery(accessory))
+        } else if current.2 && !previous.2, let mac = snapshot.mac {
+            showDevice(.charging(mac))
+        }
     }
 
     private func showDevice(_ event: DeviceMonitor.Event) {
