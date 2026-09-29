@@ -309,6 +309,7 @@ final class NotchController: NSObject, NSMenuDelegate {
     private func updateAudioTap() {
         guard #available(macOS 14.2, *) else { return }
         let wanted = mode.showsWings && spotify.nowPlaying?.isPlaying == true
+            && Preferences.shared.equalizer == .live
         if wanted, audioTap == nil {
             let tap = AudioTap()
             tap.onLevels = { [weak self, weak tap] levels in
