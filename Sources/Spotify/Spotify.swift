@@ -136,17 +136,22 @@ final class Spotify: NSObject {
 
     func setVolume(_ value: Int) {
         let clamped = min(100, max(0, value))
+        let changed = clamped != volume
         volume = clamped
         volumeTarget = clamped
         volumeSetAt = CACurrentMediaTime()
         flushVolume()
+        if changed { onChange?() }
     }
 
     func refreshVolume() {
         let asked = CACurrentMediaTime()
         events.get([AppleEvents.volume]) { [weak self] v in
             guard let self, asked > self.volumeSetAt, let v, let level = Double(v[0]) else { return }
-            self.volume = Int(level.rounded())
+            let volume = Int(level.rounded())
+            guard volume != self.volume else { return }
+            self.volume = volume
+            self.onChange?()
         }
     }
 
