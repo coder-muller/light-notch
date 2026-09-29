@@ -38,6 +38,10 @@ final class NotchPanel: NSPanel {
 /// tracking area (no polling) so the expanded panel can close when the cursor leaves it.
 final class NotchRootView: NSView {
     let shape = CALayer()
+    /// Holds the notch content (player, wings), clipped to the black shape so nothing shows outside it
+    /// while the shape animates. `clip` is its mask and must mirror every change made to `shape`.
+    let content = PassthroughView()
+    let clip = CALayer()
     var onClick: (() -> Void)?
     var onHoverChange: ((Bool) -> Void)?
     var contextMenu: (() -> NSMenu?)?
@@ -46,12 +50,20 @@ final class NotchRootView: NSView {
         super.init(frame: frame)
         wantsLayer = true
         layerContentsRedrawPolicy = .never
-        shape.backgroundColor = NSColor.black.cgColor
-        shape.anchorPoint = CGPoint(x: 0.5, y: 1)   // grow downwards from the top-center
-        shape.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]  // bottom corners only
-        shape.cornerCurve = .continuous
+        for layer in [shape, clip] {
+            layer.backgroundColor = NSColor.black.cgColor
+            layer.anchorPoint = CGPoint(x: 0.5, y: 1)   // grow downwards from the top-center
+            layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]  // bottom corners only
+            layer.cornerCurve = .continuous
+        }
         shape.zPosition = -1
         layer?.insertSublayer(shape, at: 0)
+
+        content.frame = bounds
+        content.autoresizingMask = [.width, .height]
+        content.wantsLayer = true
+        content.layer?.mask = clip
+        addSubview(content)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -82,6 +94,14 @@ final class NotchRootView: NSView {
     override func mouseDown(with event: NSEvent) { onClick?() }
     override func menu(for event: NSEvent) -> NSMenu? { contextMenu?() }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
+/// Container that never takes clicks itself (they fall through to the root); its subviews still do.
+final class PassthroughView: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let hit = super.hitTest(point)
+        return hit === self ? nil : hit
+    }
 }
 
 /// Places the panel over the notch and drives a three-state machine:
@@ -133,6 +153,8 @@ final class NotchController: NSObject, NSMenuDelegate {
     }()
 
     private var shape: CALayer { root.shape }
+    /// The black shape and the content clip: every geometry change and animation goes to both.
+    private var shapeLayers: [CALayer] { [root.shape, root.clip] }
 
     init(spotify: Spotify) {
         self.spotify = spotify
@@ -195,11 +217,13 @@ final class NotchController: NSObject, NSMenuDelegate {
         mode = desiredMode
         let target = layouts[mode]!
         withoutActions {
-            shape.removeAllAnimations()
+            shapeLayers.forEach { $0.removeAllAnimations() }
             finishCoverFlight()
             setWindowFrame(target.frame)
-            shape.bounds = CGRect(origin: .zero, size: target.shape)
-            shape.cornerRadius = target.radius
+            for layer in shapeLayers {
+                layer.bounds = CGRect(origin: .zero, size: target.shape)
+                layer.cornerRadius = target.radius
+            }
         }
         syncHoverRect()
         showContent(for: mode, animated: false)
@@ -211,7 +235,7 @@ final class NotchController: NSObject, NSMenuDelegate {
         withoutActions {
             if panel.frame != frame { panel.setFrame(frame, display: false) }
             let b = root.bounds
-            shape.position = CGPoint(x: b.midX, y: b.maxY)
+            shapeLayers.forEach { $0.position = CGPoint(x: b.midX, y: b.maxY) }
             player?.setFrameOrigin(NSPoint(x: ((b.width - PlayerView.size.width) / 2).rounded(),
                                            y: b.maxY - layouts[.expanded]!.shape.height + Metrics.bottomPadding))
             if let compact {
@@ -405,7 +429,8 @@ final class NotchController: NSObject, NSMenuDelegate {
         let dx: CGFloat = 3, dy: CGFloat = 1.5
         let peak = CATransform3DMakeScale((size.width + 2 * dx) / size.width, (size.height + 2 * dy) / size.height, 1)
 
-        shape.add(bounceAnimation(peak: peak), forKey: "bounce")
+        let bounce = bounceAnimation(peak: peak)
+        shapeLayers.forEach { $0.add(bounce, forKey: "bounce") }
         // Wing content rides along: cover/equalizer follow the grown edges (translated, never stretched).
         if mode == .compact { compact?.bounce(dx: dx, dy: dy, animation: bounceAnimation) }
     }
@@ -473,7 +498,7 @@ final class NotchController: NSObject, NSMenuDelegate {
     private func makePlayer() -> PlayerView {
         let player = PlayerView(spotify: spotify)
         player.alphaValue = 0
-        root.addSubview(player)
+        root.content.addSubview(player)
         self.player = player
         setWindowFrame(panel.frame)   // position it
         return player
@@ -483,7 +508,7 @@ final class NotchController: NSObject, NSMenuDelegate {
         let compact = CompactView(spotify: spotify)
         compact.layout(notchSize: notchSize)
         compact.alphaValue = 0
-        root.addSubview(compact)
+        root.content.addSubview(compact)
         self.compact = compact
         setWindowFrame(panel.frame)   // position it
         return compact
@@ -504,10 +529,12 @@ final class NotchController: NSObject, NSMenuDelegate {
         corner.fromValue = presentation.cornerRadius
         corner.toValue = radius
 
-        shape.bounds = target
-        shape.cornerRadius = radius
-        shape.add(bounds, forKey: "bounds")
-        shape.add(corner, forKey: "cornerRadius")
+        for layer in shapeLayers {
+            layer.bounds = target
+            layer.cornerRadius = radius
+            layer.add(bounds, forKey: "bounds")
+            layer.add(corner, forKey: "cornerRadius")
+        }
         syncHoverRect()
     }
 
