@@ -3,10 +3,26 @@ import AppKit
 enum TrackTransition {
     static let flipOut: CFTimeInterval = 0.16
 
+    private static let stageKey = "lightNotchFlipStage"
+
     static func flipCover(_ layer: CALayer, from oldContents: Any?, oldBackground: CGColor?, backwards: Bool) {
         let side: CGFloat = backwards ? -1 : 1
         guard let superlayer = layer.superlayer, layer.bounds.width > 0 else { return }
         let size = layer.bounds.size
+
+        var startAngle: CGFloat = 0
+        var oldContents = oldContents, oldBackground = oldBackground
+        if let previous = layer.value(forKey: stageKey) as? CALayer {
+            if let cards = previous.sublayers, cards.count == 2 {
+                let incoming = cards[1]
+                let started = (incoming.animation(forKey: "flip")?.beginTime ?? 0) <= CACurrentMediaTime()
+                let visible = started ? incoming : cards[0]
+                startAngle = visible.presentation()?.value(forKeyPath: "transform.rotation.y") as? CGFloat ?? 0
+                oldContents = visible.contents
+                oldBackground = visible.backgroundColor
+            }
+            previous.removeFromSuperlayer()
+        }
 
         let stage = CALayer()
         stage.frame = layer.frame
@@ -37,9 +53,11 @@ enum TrackTransition {
         let now = CACurrentMediaTime()
 
         let out = CABasicAnimation(keyPath: "transform.rotation.y")
-        out.fromValue = 0
+        let remaining = max(0.3, 1 - abs(startAngle) / (CGFloat.pi / 2))
+        let outDuration = flipOut * Double(remaining)
+        out.fromValue = startAngle
         out.toValue = -side * CGFloat.pi / 2
-        out.duration = flipOut
+        out.duration = outDuration
         out.timingFunction = CAMediaTimingFunction(name: .easeIn)
         out.fillMode = .forwards
         out.isRemovedOnCompletion = false
@@ -47,7 +65,7 @@ enum TrackTransition {
         let dim = CABasicAnimation(keyPath: "opacity")
         dim.fromValue = 1
         dim.toValue = 0.4
-        dim.duration = flipOut
+        dim.duration = outDuration
         dim.fillMode = .forwards
         dim.isRemovedOnCompletion = false
 
@@ -58,10 +76,10 @@ enum TrackTransition {
         turnIn.stiffness = 320
         turnIn.damping = 17
         turnIn.duration = turnIn.settlingDuration
-        turnIn.beginTime = now + flipOut
+        turnIn.beginTime = now + outDuration
         turnIn.fillMode = .backwards
 
-        let total = flipOut + turnIn.duration
+        let total = outDuration + turnIn.duration
         let hold = CABasicAnimation(keyPath: "opacity")
         hold.fromValue = 0
         hold.toValue = 0
@@ -69,8 +87,12 @@ enum TrackTransition {
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        CATransaction.setCompletionBlock { stage.removeFromSuperlayer() }
+        CATransaction.setCompletionBlock { [weak layer] in
+            stage.removeFromSuperlayer()
+            if let layer, layer.value(forKey: stageKey) as? CALayer === stage { layer.setValue(nil, forKey: stageKey) }
+        }
         superlayer.insertSublayer(stage, above: layer)
+        layer.setValue(stage, forKey: stageKey)
         old.add(out, forKey: "flip")
         old.add(dim, forKey: "dim")
         new.transform = CATransform3DIdentity
