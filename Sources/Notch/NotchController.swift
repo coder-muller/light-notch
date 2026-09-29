@@ -40,9 +40,13 @@ final class NotchController: NSObject, NSMenuDelegate {
     private lazy var menu: NSMenu = {
         let menu = NSMenu()
         menu.delegate = self
-        menu.addItem(withTitle: "Quit LightNotch", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
+        let settings = menu.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
+        settings.target = self
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Quit LightNotch", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         return menu
     }()
+    private lazy var settings = SettingsWindowController()
 
     private var notchSize = CGSize.zero
     private var layouts: [Mode: Layout] = [:]
@@ -94,7 +98,7 @@ final class NotchController: NSObject, NSMenuDelegate {
                 self.scheduleClose()
             }
         }
-        root.contextMenu = { [weak self] in self?.mode == .notch ? nil : self?.menu }
+        root.contextMenu = { [weak self] in self?.menu }
         root.onScroll = { [weak self] event in self?.scrolled(event) }
         spotify.onChange = { [weak self] in self?.spotifyChanged() }
 
@@ -281,6 +285,8 @@ final class NotchController: NSObject, NSMenuDelegate {
     }
 
     func menuDidClose(_ menu: NSMenu) { scheduleClose() }
+
+    @objc private func openSettings() { settings.show() }
 
     private func spotifyChanged() {
         player?.update()
