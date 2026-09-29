@@ -44,6 +44,8 @@ final class CompactView: NSView {
     private var barHeights = [CGFloat](repeating: CompactView.barMinHeight, count: CompactView.barCount)
 
     private var hasApplied = false
+    private var barsEnabled = true
+    private var barsMoving: Bool { active && playing && status == .bars && barsEnabled }
     private var appliedAccent: CGColor?
     private var appliedArtwork: CGImage?
 
@@ -157,12 +159,21 @@ final class CompactView: NSView {
         }
 
         playing = spotify.nowPlaying?.isPlaying ?? false
+        setBarsEnabled(Preferences.shared.equalizer != .hidden, animated: hasApplied && !isHidden && window != nil)
         let newStatus: Status = spotify.nowPlaying == nil ? .bars
             : !playing ? .paused
             : spotify.volume == 0 ? .muted : .bars
         setStatus(newStatus, animated: hasApplied && !isHidden && window != nil)
         hasApplied = true
         syncAnimations()
+    }
+
+    private func setBarsEnabled(_ enabled: Bool, animated: Bool) {
+        guard enabled != barsEnabled else { return }
+        barsEnabled = enabled
+        syncAnimations()
+        guard status == .bars else { return }
+        VolumeMeter.fade(bars, to: enabled ? 1 : 0, duration: animated ? 0.2 : 0)
     }
 
     private func setStatus(_ new: Status, animated: Bool) {
@@ -179,7 +190,7 @@ final class CompactView: NSView {
         }
         let on = new != .bars
         if on { setIconImage(new, animated: false) }
-        VolumeMeter.fade(bars, to: on ? 0 : 1, duration: animated ? 0.2 : 0)
+        VolumeMeter.fade(bars, to: on || !barsEnabled ? 0 : 1, duration: animated ? 0.2 : 0)
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -269,7 +280,7 @@ final class CompactView: NSView {
     private static let rest = [CGFloat](repeating: CompactView.barMinHeight, count: CompactView.barCount)
 
     private func syncAnimations() {
-        let shouldAnimate = active && playing && status == .bars
+        let shouldAnimate = barsMoving
         if live {
             if animating { stopAnimations(settle: false) }
             if !shouldAnimate { applyHeights(CompactView.rest, duration: CompactView.settleDuration) }
@@ -384,7 +395,7 @@ final class CompactView: NSView {
         if animating || bars.first?.animation(forKey: CompactView.animationKey) != nil { stopAnimations(settle: false) }
 
         var targets = [CGFloat](repeating: CompactView.barMinHeight, count: CompactView.barCount)
-        if active && playing && status == .bars {
+        if barsMoving {
             for i in 0..<CompactView.barCount {
                 let level = CGFloat(min(max(levels[i], 0), 1))
                 targets[i] = CompactView.barMinHeight
@@ -397,7 +408,7 @@ final class CompactView: NSView {
     func useSyntheticAnimation() {
         guard live else { return }
         live = false
-        if active && playing && status == .bars {
+        if barsMoving {
             syncAnimations()
         } else {
             applyHeights(CompactView.rest, duration: CompactView.settleDuration)

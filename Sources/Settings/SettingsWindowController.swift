@@ -46,6 +46,10 @@ final class SettingsWindowController: NSWindowController {
               selected: prefs.accent.rawValue) { [weak self] in
             self?.prefs.accent = Preferences.AccentSource(rawValue: $0) ?? .cover
         }
+        popup("Equalizer:", items: [("Follow the music", "live"), ("Animation only", "animated"), ("Hidden", "hidden")],
+              selected: prefs.equalizer.rawValue) { [weak self] in
+            self?.prefs.equalizer = Preferences.Equalizer(rawValue: $0) ?? .live
+        }
     }
 
     func section(_ title: String) {
