@@ -49,6 +49,7 @@ tccutil reset AppleEvents com.guilherme.lightnotch
 - Click the notch to open the player. It closes on its own when the mouse leaves.
 - Scroll over the notch to change the volume of your Mac (or Spotify's, in Settings).
 - Swipe sideways over the notch to skip to the next track or go back.
+- Changing the volume with the keyboard or Control Center shows it in the notch too.
 - Right-click the notch for **Settings…** and **Quit LightNotch**.
 
 In Settings you can open LightNotch at login, pick the accent color (album cover, Spotify green or white), choose how the equalizer behaves, turn individual effects on or off, pick whether scrolling changes the Mac or the Spotify volume, open the player on hover, and set how long notices stay on screen.
