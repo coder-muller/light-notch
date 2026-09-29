@@ -76,6 +76,14 @@ final class AppleEvents {
         }
     }
 
+    func assign(_ specifier: NSAppleEventDescriptor, to value: NSAppleEventDescriptor,
+                completion: @escaping () -> Void) {
+        queue.async { [self] in
+            autoreleasepool { _ = try? send("core", "setd", object: specifier, data: value) }
+            DispatchQueue.main.async(execute: completion)
+        }
+    }
+
     private func send(_ eventClass: StaticString, _ eventID: StaticString,
                       object: NSAppleEventDescriptor? = nil,
                       data: NSAppleEventDescriptor? = nil) throws -> NSAppleEventDescriptor? {
@@ -116,6 +124,7 @@ final class AppleEvents {
     static let playerPosition = property("pPos")
     static let shuffling = property("pShu")
     static let repeating = property("pRep")
+    static let volume = property("pVol")
     static let duration = property("pDur", of: track)
     static let snapshot = [playerState, trackID, property("pnam", of: track),
                            property("pArt", of: track), property("pAlb", of: track), artworkURL]
