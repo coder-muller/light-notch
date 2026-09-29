@@ -440,6 +440,8 @@ final class NotchController: NSObject, NSMenuDelegate {
         if mode == .expanded {
             let player = self.player ?? makePlayer()
             player.update()
+            // A seek done inside Spotify sends no notification: re-read the position on open.
+            if animated { spotify.refreshTiming() }
             player.isHidden = false
             fade(player, to: 1, duration: animated ? 0.2 : 0, delay: animated ? 0.07 : 0)
         } else if let player, player.alphaValue > 0 {

@@ -4,7 +4,10 @@ import AppKit
 /// or a minimal empty state when nothing plays. Switching between the two is animated.
 /// Pure AppKit, fixed frames, no timers/observers. The parent calls `update()` on every change.
 final class PlayerView: NSView {
-    static let size = NSSize(width: 360, height: 64)
+    static let size = NSSize(width: 360, height: rowHeight + ProgressBar.height)
+    /// Cover / text / buttons row, above the progress bar.
+    private static let rowHeight: CGFloat = 64
+    private static let rowY = ProgressBar.height
 
     // MARK: - Cached symbol images
 
@@ -34,13 +37,14 @@ final class PlayerView: NSView {
     private let content = NSView(frame: NSRect(origin: .zero, size: PlayerView.size))
     private let empty = EmptyStateView(frame: NSRect(origin: .zero, size: PlayerView.size))
     private var showingEmpty = false
-    private let cover = NSView(frame: NSRect(x: 0, y: 0, width: coverSide, height: coverSide))
+    private let cover = NSView(frame: NSRect(x: 0, y: rowY, width: coverSide, height: coverSide))
     private let placeholder = NSImageView(frame: NSRect(x: 0, y: 0, width: coverSide, height: coverSide))
     private let titleLabel = NSTextField(labelWithString: "")
     private let artistLabel = NSTextField(labelWithString: "")
     private let previousButton = TapButton(frame: .zero)
     private let playPauseButton = TapButton(frame: .zero)
     private let nextButton = TapButton(frame: .zero)
+    private let progress = ProgressBar(frame: NSRect(x: 0, y: 0, width: PlayerView.size.width, height: ProgressBar.height))
 
     // Last applied state (avoids redundant work in update()).
     private var hasApplied = false
@@ -60,6 +64,8 @@ final class PlayerView: NSView {
         setupCover()
         setupLabels()
         setupButtons()
+        progress.onSeek = { [weak self] seconds in self?.spotify.seek(to: seconds) }
+        content.addSubview(progress)
 
         update()
     }
@@ -95,11 +101,11 @@ final class PlayerView: NSView {
         configure(titleLabel,
                   font: .systemFont(ofSize: 14, weight: .semibold),
                   color: .white,
-                  frame: NSRect(x: PlayerView.textX, y: 45, width: width, height: 18))
+                  frame: NSRect(x: PlayerView.textX, y: PlayerView.rowY + 45, width: width, height: 18))
         configure(artistLabel,
                   font: .systemFont(ofSize: 12, weight: .medium),
                   color: NSColor(white: 1, alpha: 0.55),
-                  frame: NSRect(x: PlayerView.textX, y: 30, width: width, height: 15))
+                  frame: NSRect(x: PlayerView.textX, y: PlayerView.rowY + 30, width: width, height: 15))
 
         content.addSubview(titleLabel)
         content.addSubview(artistLabel)
@@ -128,7 +134,7 @@ final class PlayerView: NSView {
 
         let buttons = [previousButton, playPauseButton, nextButton]
         for (button, width) in zip(buttons, widths) {
-            button.frame = NSRect(x: x, y: 0, width: width, height: height)
+            button.frame = NSRect(x: x, y: PlayerView.rowY, width: width, height: height)
             x += width + gap
             button.isBordered = false
             button.imagePosition = .imageOnly
@@ -185,9 +191,13 @@ final class PlayerView: NSView {
             // Nothing playing: keep the last cover so it fades out with the rest.
             if np != nil || !hasApplied {
                 applyArtwork(art, animate: visible && wasShowingSong)
+                progress.setColor(Accent.color(for: art), animated: visible && wasShowingSong)
             }
             appliedArtwork = art
         }
+
+        // Nothing playing: the bar keeps its last state and fades out with the rest.
+        if np != nil { progress.setTiming(spotify.timing, animated: visible && wasShowingSong) }
 
         setShowingEmpty(np == nil, animated: visible)
         hasApplied = true
@@ -201,7 +211,7 @@ final class PlayerView: NSView {
         let (outgoing, incoming): (NSView, NSView) = isEmpty ? (content, empty) : (empty, content)
         let pieces: [NSView] = isEmpty
             ? empty.pieces
-            : [cover, titleLabel, artistLabel, previousButton, playPauseButton, nextButton]
+            : [cover, titleLabel, artistLabel, previousButton, playPauseButton, nextButton, progress]
 
         incoming.isHidden = false
         guard animated else {
