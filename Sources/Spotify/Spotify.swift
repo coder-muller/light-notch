@@ -31,6 +31,7 @@ final class Spotify: NSObject {
     private(set) var timing: PlaybackTiming?
     private(set) var shuffling: Bool?
     private(set) var repeating: Bool?
+    private(set) var volume: Int?
     private(set) var lastChangeWentBack = false
 
     private let events = AppleEvents()
@@ -42,6 +43,9 @@ final class Spotify: NSObject {
     private static let staleArtworkDelay: TimeInterval = 1.5
     private var history: [String] = []
     private var previousRequestedAt: CFAbsoluteTime = 0
+    private var volumeTarget: Int?
+    private var sendingVolume = false
+    private var volumeSetAt: CFTimeInterval = 0
 
     private lazy var session: URLSession = {
         let config = URLSessionConfiguration.ephemeral
@@ -130,8 +134,35 @@ final class Spotify: NSObject {
         confirmModes()
     }
 
+    func setVolume(_ value: Int) {
+        let clamped = min(100, max(0, value))
+        volume = clamped
+        volumeTarget = clamped
+        volumeSetAt = CACurrentMediaTime()
+        flushVolume()
+    }
+
+    func refreshVolume() {
+        let asked = CACurrentMediaTime()
+        events.get([AppleEvents.volume]) { [weak self] v in
+            guard let self, asked > self.volumeSetAt, let v, let level = Double(v[0]) else { return }
+            self.volume = Int(level.rounded())
+        }
+    }
+
+    private func flushVolume() {
+        guard !sendingVolume, let target = volumeTarget else { return }
+        volumeTarget = nil
+        sendingVolume = true
+        events.assign(AppleEvents.volume, to: NSAppleEventDescriptor(int32: Int32(target))) { [weak self] in
+            self?.sendingVolume = false
+            self?.flushVolume()
+        }
+    }
+
     func refreshModes() {
         guard nowPlaying != nil else { return }
+        refreshVolume()
         events.get([AppleEvents.shuffling, AppleEvents.repeating]) { [weak self] v in
             guard let self, let v, self.nowPlaying != nil else { return }
             let shuffle = v[0] == "1", repeatOn = v[1] == "1"
