@@ -15,12 +15,16 @@ private enum Metrics {
     static let volumeRadius: CGFloat = 18
     static let volumeInset: CGFloat = 16
     static let peekRow: CGFloat = 46
+    static let deviceRow: CGFloat = 58
+    static let deviceExtraWidth: CGFloat = 60
+    static let deviceInset: CGFloat = 18
+    static let deviceHideDelay: TimeInterval = 3.5
     static let hoverOpenDelay: TimeInterval = 0.35
 }
 
 final class NotchController: NSObject, NSMenuDelegate {
     private enum Mode {
-        case notch, compact, compactVolume, compactPeek, expanded
+        case notch, compact, compactVolume, compactPeek, device, expanded
         var showsWings: Bool { self == .compact || self == .compactVolume || self == .compactPeek }
     }
 
@@ -32,6 +36,14 @@ final class NotchController: NSObject, NSMenuDelegate {
 
     private let spotify: Spotify
     private let systemVolume = SystemVolume()
+    private let devices = DeviceMonitor()
+    private var deviceShown = false
+    private var deviceHide: DispatchWorkItem?
+    private let deviceNotice: DeviceNoticeView = {
+        let notice = DeviceNoticeView(frame: .zero)
+        notice.alphaValue = 0
+        return notice
+    }()
     private let panel = NotchPanel()
     private let root = NotchRootView(frame: .zero)
     private var player: PlayerView?
@@ -89,6 +101,8 @@ final class NotchController: NSObject, NSMenuDelegate {
         self.spotify = spotify
         super.init()
         systemVolume.onChange = { [weak self] in self?.syncOutputSilent() }
+        devices.onEvent = { [weak self] in self?.showDevice($0) }
+        syncDeviceMonitor()
         panel.contentView = root
         root.onClick = { [weak self] in self?.toggle() }
         root.onHoverChange = { [weak self] inside in
@@ -142,6 +156,8 @@ final class NotchController: NSObject, NSMenuDelegate {
         layouts[.compactPeek] = layout(CGSize(width: notchSize.width + 2 * CompactView.wingWidth,
                                               height: notchSize.height + Metrics.peekRow),
                                        radius: Metrics.volumeRadius, side: m, bottom: m)
+        layouts[.device] = layout(CGSize(width: deviceWidth, height: notchSize.height + Metrics.deviceRow),
+                                  radius: Metrics.volumeRadius + 4, side: m, bottom: m)
         layouts[.expanded] = layout(CGSize(width: max(PlayerView.size.width + 2 * Metrics.sidePadding, notchSize.width),
                                            height: notchSize.height + Metrics.topGap + PlayerView.size.height + Metrics.bottomPadding),
                                     radius: Metrics.expandedRadius, side: m, bottom: m)
@@ -152,6 +168,8 @@ final class NotchController: NSObject, NSMenuDelegate {
         volumeShown = false
         peekHide?.cancel()
         peekShown = false
+        deviceHide?.cancel()
+        deviceShown = false
         generation &+= 1
         isOpen = false
         mode = desiredMode
@@ -185,6 +203,10 @@ final class NotchController: NSObject, NSMenuDelegate {
             trackPeek.frame = NSRect(x: ((b.width - meterWidth) / 2).rounded(),
                                      y: b.maxY - notchSize.height - 4 - TrackPeekView.height,
                                      width: meterWidth, height: TrackPeekView.height)
+            let noticeWidth = deviceWidth - 2 * Metrics.deviceInset
+            deviceNotice.frame = NSRect(x: ((b.width - noticeWidth) / 2).rounded(),
+                                        y: b.maxY - notchSize.height - 6 - DeviceNoticeView.height,
+                                        width: noticeWidth, height: DeviceNoticeView.height)
             compactMeter.frame = NSRect(x: ((b.width - meterWidth) / 2).rounded(), y: b.maxY - notchSize.height - 19,
                                         width: meterWidth, height: 14)
         }
@@ -198,6 +220,7 @@ final class NotchController: NSObject, NSMenuDelegate {
 
     private var desiredMode: Mode {
         if isOpen { return .expanded }
+        if deviceShown { return .device }
         guard let track = spotify.nowPlaying, track.isPlaying || Preferences.shared.keepWhilePaused else { return .notch }
         if volumeShown { return .compactVolume }
         return peekShown ? .compactPeek : .compact
@@ -249,6 +272,34 @@ final class NotchController: NSObject, NSMenuDelegate {
         }
         volumeHide = work
         DispatchQueue.main.asyncAfter(deadline: .now() + Preferences.shared.volumeDelay, execute: work)
+    }
+
+    private var deviceWidth: CGFloat { notchSize.width + 2 * CompactView.wingWidth + Metrics.deviceExtraWidth }
+
+    private func syncDeviceMonitor() {
+        if Preferences.shared.watchesDevices { devices.start() } else { devices.stop() }
+    }
+
+    private func showDevice(_ event: DeviceMonitor.Event) {
+        let prefs = Preferences.shared
+        switch event {
+        case .connected: guard prefs.deviceConnect else { return }
+        case .lowBattery: guard prefs.deviceLowBattery else { return }
+        case .charging: guard prefs.macCharging else { return }
+        }
+        guard !isOpen else { return }
+        if deviceNotice.superview == nil { root.content.addSubview(deviceNotice) }
+        deviceShown = true
+        transition(to: desiredMode)
+        deviceNotice.show(event)
+        deviceHide?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.deviceShown = false
+            self.transition(to: self.desiredMode)
+        }
+        deviceHide = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Metrics.deviceHideDelay, execute: work)
     }
 
     private func notePeek() {
@@ -322,6 +373,7 @@ final class NotchController: NSObject, NSMenuDelegate {
 
     private func preferencesChanged() {
         syncOutputSilent()
+        syncDeviceMonitor()
         compact?.update()
         player?.update()
         compactMeter.setAccent(Accent.color(for: spotify.artwork), animated: true)
@@ -489,6 +541,12 @@ final class NotchController: NSObject, NSMenuDelegate {
             fade(player, to: 1, duration: animated ? 0.2 : 0, delay: animated ? 0.07 : 0)
         } else if let player, player.alphaValue > 0 {
             fade(player, to: 0, duration: animated ? 0.12 : 0, delay: 0)
+        }
+
+        if mode == .device {
+            VolumeMeter.fade(deviceNotice, to: 1, duration: animated ? 0.2 : 0)
+        } else if deviceNotice.alphaValue > 0 {
+            VolumeMeter.fade(deviceNotice, to: 0, duration: animated ? 0.15 : 0)
         }
 
         if mode == .compactPeek {
