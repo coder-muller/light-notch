@@ -49,6 +49,11 @@ final class Preferences {
         set { set("scrollVolume", newValue) }
     }
 
+    var showVolumeChanges: Bool {
+        get { bool("showVolumeChanges", default: true) }
+        set { set("showVolumeChanges", newValue) }
+    }
+
     var swipeTracks: Bool {
         get { bool("swipeTracks", default: true) }
         set { set("swipeTracks", newValue) }

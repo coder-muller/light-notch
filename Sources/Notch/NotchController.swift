@@ -25,7 +25,7 @@ private enum Metrics {
 
 final class NotchController: NSObject, NSMenuDelegate {
     private enum Mode {
-        case notch, compact, compactVolume, compactPeek, device, expanded
+        case notch, volume, compact, compactVolume, compactPeek, device, expanded
         var showsWings: Bool { self == .compact || self == .compactVolume || self == .compactPeek }
     }
 
@@ -107,6 +107,7 @@ final class NotchController: NSObject, NSMenuDelegate {
         self.spotify = spotify
         super.init()
         systemVolume.onChange = { [weak self] in self?.syncOutputSilent() }
+        systemVolume.onExternalChange = { [weak self] in self?.showVolumeChange($0) }
         devices.onEvent = { [weak self] in self?.showDevice($0) }
         syncDeviceMonitor()
         panel.contentView = root
@@ -159,6 +160,7 @@ final class NotchController: NSObject, NSMenuDelegate {
         layouts[.compactVolume] = layout(CGSize(width: notchSize.width + 2 * CompactView.wingWidth,
                                                 height: notchSize.height + Metrics.volumeRow),
                                          radius: Metrics.volumeRadius, side: m, bottom: m)
+        layouts[.volume] = layouts[.compactVolume]
         layouts[.compactPeek] = layout(CGSize(width: notchSize.width + 2 * CompactView.wingWidth,
                                               height: notchSize.height + Metrics.peekRow),
                                        radius: Metrics.volumeRadius, side: m, bottom: m)
@@ -227,8 +229,9 @@ final class NotchController: NSObject, NSMenuDelegate {
     private var desiredMode: Mode {
         if isOpen { return .expanded }
         if deviceShown { return .device }
-        guard let track = spotify.nowPlaying, track.isPlaying || Preferences.shared.keepWhilePaused else { return .notch }
-        if volumeShown { return .compactVolume }
+        let playing = spotify.nowPlaying.map { $0.isPlaying || Preferences.shared.keepWhilePaused } ?? false
+        if volumeShown { return playing ? .compactVolume : .volume }
+        guard playing else { return .notch }
         return peekShown ? .compactPeek : .compact
     }
 
@@ -301,6 +304,17 @@ final class NotchController: NSObject, NSMenuDelegate {
             compactMeter.setLevel(level, animated: mode == .compactVolume)
             showCompactVolume()
         }
+    }
+
+    private func showVolumeChange(_ level: Int) {
+        guard Preferences.shared.showVolumeChanges, !deviceShown else { return }
+        let value = CGFloat(level) / 100
+        if mode == .expanded {
+            if spotify.nowPlaying != nil { player?.showVolume(value) }
+            return
+        }
+        compactMeter.setLevel(value, animated: mode == .compactVolume || mode == .volume)
+        showCompactVolume()
     }
 
     private func showCompactVolume() {
@@ -623,7 +637,7 @@ final class NotchController: NSObject, NSMenuDelegate {
             VolumeMeter.fade(trackPeek, to: 0, duration: animated ? 0.12 : 0)
         }
 
-        if mode == .compactVolume {
+        if mode == .compactVolume || mode == .volume {
             if compactMeter.superview == nil { root.content.addSubview(compactMeter) }
             compactMeter.setAccent(Accent.color(for: spotify.artwork), animated: false)
             VolumeMeter.fade(compactMeter, to: 1, duration: animated ? 0.2 : 0)
