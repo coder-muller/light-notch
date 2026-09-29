@@ -145,6 +145,8 @@ final class SettingsWindowController: NSWindowController {
                 toggle(on: prefs.swipeTracks) { [weak self] in self?.prefs.swipeTracks = $0 }),
             row("pause", "Stay while paused", "Keep the cover and controls around",
                 toggle(on: prefs.keepWhilePaused) { [weak self] in self?.prefs.keepWhilePaused = $0 }),
+            row("arrow.up.left.and.arrow.down.right", "Hide in full screen", "Only notices show over full-screen apps",
+                toggle(on: prefs.hideInFullScreen) { [weak self] in self?.prefs.hideInFullScreen = $0 }),
             row("cursorarrow.rays", "Open on hover", "Open the player without clicking",
                 toggle(on: prefs.openOnHover) { [weak self] in self?.prefs.openOnHover = $0 }),
             row("timer", "Notice duration", "How long notices stay on screen", duration),
