@@ -260,6 +260,15 @@ final class Spotify: NSObject {
         onChange?()
     }
 
+    /// Onde o Spotify está instalado; nil se não estiver.
+    static var appURL: URL? { NSWorkspace.shared.urlForApplication(withBundleIdentifier: spotifyBundleID) }
+
+    /// Traz o Spotify para frente, abrindo-o se estiver fechado.
+    static func open() {
+        guard let url = appURL else { return }
+        NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
+    }
+
     func nextTrack() {
         previousRequestedAt = 0
         events.command("spfy", "Next")

@@ -37,7 +37,7 @@ final class PlayerView: NSView {
     private let content = NSView(frame: NSRect(origin: .zero, size: PlayerView.size))
     private let empty = EmptyStateView(frame: NSRect(origin: .zero, size: PlayerView.size))
     private var showingEmpty = false
-    private let cover = NSView(frame: NSRect(x: 0, y: rowY, width: coverSide, height: coverSide))
+    private let cover = CoverView(frame: NSRect(x: 0, y: rowY, width: coverSide, height: coverSide))
     private let placeholder = NSImageView(frame: NSRect(x: 0, y: 0, width: coverSide, height: coverSide))
     private let titleLabel = NSTextField(labelWithString: "")
     private let artistLabel = NSTextField(labelWithString: "")
@@ -93,6 +93,9 @@ final class PlayerView: NSView {
         placeholder.imageAlignment = .alignCenter
         placeholder.contentTintColor = NSColor(white: 0.5, alpha: 1)
         cover.addSubview(placeholder)
+        cover.installHoverOverlay()
+        cover.onClick = { Spotify.open() }
+        cover.setAccessibilityLabel("Abrir o Spotify")
         content.addSubview(cover)
     }
 
@@ -362,6 +365,88 @@ private final class TapButton: NSButton {
     }
 }
 
+// MARK: - Cover
+
+/// The player's cover. Clicking it opens Spotify; on hover it dims slightly and shows a small
+/// "open" arrow, so the click is discoverable.
+private final class CoverView: NSView {
+    var onClick: (() -> Void)?
+
+    private let shade = CALayer()
+    private let arrow = CALayer()   // white; the symbol is its mask
+
+    /// Call after the other subviews are added, so the overlay sits above them.
+    func installHoverOverlay() {
+        guard let layer else { return }
+        shade.frame = layer.bounds
+        shade.backgroundColor = CGColor(gray: 0, alpha: 0.4)
+        shade.opacity = 0
+        layer.addSublayer(shade)
+
+        let config = NSImage.SymbolConfiguration(pointSize: 15, weight: .bold)
+        let image = NSImage(systemSymbolName: "arrow.up.right", accessibilityDescription: nil)?
+            .withSymbolConfiguration(config)
+        let size = image?.size ?? NSSize(width: 14, height: 14)
+        let symbol = CALayer()
+        symbol.contents = image
+        symbol.contentsGravity = .resizeAspect
+        symbol.contentsScale = NSScreen.main?.backingScaleFactor ?? 2
+        symbol.frame = CGRect(origin: .zero, size: size)
+        arrow.bounds = symbol.frame
+        arrow.position = CGPoint(x: layer.bounds.midX, y: layer.bounds.midY)
+        arrow.backgroundColor = .white
+        arrow.mask = symbol
+        arrow.opacity = 0
+        arrow.transform = CATransform3DMakeScale(0.7, 0.7, 1)
+        layer.addSublayer(arrow)
+
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+        addTrackingArea(NSTrackingArea(rect: .zero,
+                                       options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                                       owner: self))
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func mouseEntered(with event: NSEvent) { setHover(true, animated: true) }
+    override func mouseExited(with event: NSEvent) { setHover(false, animated: true) }
+
+    // Collapsing the notch can swallow mouseExited: start clean next time.
+    override func viewDidHide() {
+        super.viewDidHide()
+        setHover(false, animated: false)
+    }
+
+    // Consumed here (not passed to the root), so a click on the cover never toggles the notch.
+    override func mouseDown(with event: NSEvent) {
+        arrow.transform = CATransform3DMakeScale(0.85, 0.85, 1)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        setHover(bounds.contains(convert(event.locationInWindow, from: nil)), animated: true)
+        if bounds.contains(convert(event.locationInWindow, from: nil)) { onClick?() }
+    }
+
+    override func accessibilityPerformPress() -> Bool {
+        onClick?()
+        return true
+    }
+
+    private func setHover(_ on: Bool, animated: Bool) {
+        CATransaction.begin()
+        if animated {
+            CATransaction.setAnimationDuration(on ? 0.2 : 0.16)
+            CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.3, 1))
+        } else {
+            CATransaction.setDisableActions(true)
+        }
+        shade.opacity = on ? 1 : 0
+        arrow.opacity = on ? 1 : 0
+        arrow.transform = on ? CATransform3DIdentity : CATransform3DMakeScale(0.7, 0.7, 1)
+        CATransaction.commit()
+    }
+}
+
 // MARK: - Motion
 
 /// Enter/leave animations for the empty <-> song switch (explicit layer animations; model values
@@ -433,7 +518,6 @@ private enum Motion {
 
 /// "Nothing playing": a small note badge, two lines of text and a pill to open Spotify, centered as a row.
 private final class EmptyStateView: NSView {
-    private static let spotifyID = "com.spotify.client"
     private static let green = NSColor(srgbRed: 29 / 255, green: 185 / 255, blue: 84 / 255, alpha: 1)
 
     private let badge = NSView()
@@ -441,9 +525,8 @@ private final class EmptyStateView: NSView {
     private let openButton = PillButton(title: "Abrir Spotify")
 
     /// Elements in reveal order.
-    var pieces: [NSView] { spotifyURL == nil ? [badge, text] : [badge, text, openButton] }
+    var pieces: [NSView] { Spotify.appURL == nil ? [badge, text] : [badge, text, openButton] }
 
-    private var spotifyURL: URL? { NSWorkspace.shared.urlForApplication(withBundleIdentifier: EmptyStateView.spotifyID) }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -477,7 +560,7 @@ private final class EmptyStateView: NSView {
 
         openButton.target = self
         openButton.action = #selector(openSpotify)
-        let showButton = spotifyURL != nil
+        let showButton = Spotify.appURL != nil
 
         // Row: badge, 12 pt, text, 18 pt, button; centered in the view.
         let gap: CGFloat = 12, buttonGap: CGFloat = 18
@@ -508,10 +591,7 @@ private final class EmptyStateView: NSView {
         return label
     }
 
-    @objc private func openSpotify() {
-        guard let url = spotifyURL else { return }
-        NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
-    }
+    @objc private func openSpotify() { Spotify.open() }
 }
 
 /// Capsule text button with a hover tint; reacts to the first click on the non-key panel.
