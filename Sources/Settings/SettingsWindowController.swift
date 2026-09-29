@@ -2,18 +2,29 @@ import AppKit
 import ServiceManagement
 
 final class SettingsWindowController: NSWindowController {
-    private static let width: CGFloat = 460
+    private static let size = NSSize(width: 700, height: 500)
+    private static let sections = [
+        SettingsSection(title: "General", symbol: "gearshape.fill", tint: .systemGray),
+        SettingsSection(title: "Appearance", symbol: "paintbrush.fill", tint: .systemPurple),
+        SettingsSection(title: "Gestures", symbol: "hand.draw.fill", tint: .systemBlue),
+        SettingsSection(title: "Notices", symbol: "bell.badge.fill", tint: .systemRed),
+        SettingsSection(title: "Devices", symbol: "airpodspro", tint: .systemGreen, badge: "BETA"),
+    ]
 
     private let prefs = Preferences.shared
     private let artwork: () -> CGImage?
     private let preview = NotchPreview(frame: .zero)
     private lazy var accentPicker = AccentPicker(selected: prefs.accent)
+    private let sidebar = SettingsSidebar(sections: SettingsWindowController.sections)
+    private let scroll = NSScrollView()
+    private var panes: [NSView] = []
+    private var current = -1
     private var loginSwitch: NSSwitch?
     private var actions: [ControlAction] = []
 
     init(artwork: @escaping () -> CGImage?) {
         self.artwork = artwork
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: SettingsWindowController.width, height: 600),
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: SettingsWindowController.size),
                               styleMask: [.titled, .closable, .fullSizeContentView], backing: .buffered, defer: false)
         window.title = "LightNotch Settings"
         window.titleVisibility = .hidden
@@ -22,38 +33,31 @@ final class SettingsWindowController: NSWindowController {
         window.isReleasedWhenClosed = false
         super.init(window: window)
 
-        let stack = NSStackView()
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 0
-        stack.edgeInsets = NSEdgeInsets(top: 40, left: 20, bottom: 22, right: 20)
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        build(into: stack)
-
-        let content = FlippedView()
-        content.translatesAutoresizingMaskIntoConstraints = false
-        content.addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: content.topAnchor),
-            stack.bottomAnchor.constraint(equalTo: content.bottomAnchor),
-            stack.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            content.widthAnchor.constraint(equalToConstant: SettingsWindowController.width),
-        ])
-        for view in stack.arrangedSubviews {
-            view.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -40).isActive = true
-        }
-        let scroll = NSScrollView()
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
         scroll.automaticallyAdjustsContentInsets = false
-        scroll.documentView = content
-        content.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor).isActive = true
-        window.contentView = scroll
-        let visible = NSScreen.main?.visibleFrame.height ?? 900
-        window.setContentSize(NSSize(width: SettingsWindowController.width,
-                                     height: min(content.fittingSize.height, visible - 60)))
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        sidebar.translatesAutoresizingMaskIntoConstraints = false
+
+        let root = NSView()
+        root.addSubview(sidebar)
+        root.addSubview(scroll)
+        NSLayoutConstraint.activate([
+            sidebar.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            sidebar.topAnchor.constraint(equalTo: root.topAnchor),
+            sidebar.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            scroll.leadingAnchor.constraint(equalTo: sidebar.trailingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            scroll.topAnchor.constraint(equalTo: root.topAnchor),
+            scroll.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+        ])
+        window.contentView = root
+        window.setContentSize(SettingsWindowController.size)
+
+        panes = [generalPane(), appearancePane(), gesturesPane(), noticesPane(), devicesPane()]
+        sidebar.onSelect = { [weak self] in self?.showPane($0) }
+        sidebar.select(0)
 
         NotificationCenter.default.addObserver(forName: Preferences.didChange, object: nil, queue: .main) { [weak self] _ in
             self?.refreshPreview(animated: true)
@@ -84,29 +88,47 @@ final class SettingsWindowController: NSWindowController {
         preview.update(accent: Accent.color(for: image), cover: image, equalizer: prefs.equalizer, animated: animated)
     }
 
-    private func build(into stack: NSStackView) {
-        stack.addArrangedSubview(preview)
-        stack.setCustomSpacing(14, after: preview)
+    private func showPane(_ index: Int) {
+        guard index != current, panes.indices.contains(index) else { return }
+        current = index
+        let pane = panes[index]
+        scroll.documentView = pane
+        pane.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor).isActive = true
+        scroll.contentView.scroll(to: .zero)
 
-        let name = NSTextField(labelWithString: "LightNotch")
-        name.font = .systemFont(ofSize: 17, weight: .semibold)
-        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
-        let tagline = NSTextField(labelWithString: "Spotify in your notch · Version \(version)")
-        tagline.font = .systemFont(ofSize: 11)
-        tagline.textColor = .secondaryLabelColor
-        let header = NSStackView(views: [name, tagline])
-        header.orientation = .vertical
-        header.spacing = 2
-        header.alignment = .centerX
-        stack.addArrangedSubview(header)
-        stack.setCustomSpacing(22, after: header)
+        guard let layer = pane.layer else { return }
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = 0
+        fade.toValue = 1
+        let rise = CABasicAnimation(keyPath: "transform.translation.y")
+        rise.fromValue = 6
+        rise.toValue = 0
+        let group = CAAnimationGroup()
+        group.animations = [fade, rise]
+        group.duration = 0.22
+        group.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.3, 1)
+        layer.add(group, forKey: "appear")
+    }
 
+    // MARK: Panes
+
+    private func generalPane() -> NSView {
         let login = toggle(on: SMAppService.mainApp.status == .enabled) { [weak self] in self?.setOpenAtLogin($0) }
         loginSwitch = login
-        group("General", into: stack, rows: [
-            row("power", "Open at login", "Start LightNotch when you log in", login),
-        ])
+        return pane("General") { stack in
+            card(into: stack, rows: [
+                row("power", "Open at login", "Start LightNotch when you log in", login),
+                row("arrow.up.left.and.arrow.down.right", "Hide in full screen", "Only notices show over full-screen apps",
+                    toggle(on: prefs.hideInFullScreen) { [weak self] in self?.prefs.hideInFullScreen = $0 }),
+                row("pause", "Stay while paused", "Keep the cover and controls around",
+                    toggle(on: prefs.keepWhilePaused) { [weak self] in self?.prefs.keepWhilePaused = $0 }),
+                row("cursorarrow.rays", "Open on hover", "Open the player without clicking",
+                    toggle(on: prefs.openOnHover) { [weak self] in self?.prefs.openOnHover = $0 }),
+            ])
+        }
+    }
 
+    private func appearancePane() -> NSView {
         accentPicker.onSelect = { [weak self] in self?.prefs.accent = $0 }
         var equalizerControl: NSSegmentedControl?
         let equalizer = segmented(["Live", "Animated", "Off"], values: Preferences.Equalizer.allCases,
@@ -119,60 +141,100 @@ final class SettingsWindowController: NSWindowController {
             }
         }
         equalizerControl = equalizer
-        group("Appearance", into: stack, rows: [
-            row("paintpalette", "Accent color", "Equalizer, bars and icons", accentPicker),
-            row("waveform", "Equalizer", "Live follows the music you hear", equalizer),
-        ])
-
-        let volume = segmented(["Mac", "Spotify"], values: Preferences.VolumeSource.allCases,
-                               selected: prefs.volumeSource) { [weak self] in self?.prefs.volumeSource = $0 }
-        let duration = segmented(["Short", "Medium", "Long"], values: Preferences.Duration.allCases,
-                                 selected: prefs.noticeDuration) { [weak self] in self?.prefs.noticeDuration = $0 }
-        group("Behavior", into: stack, rows: [
-            row("arrow.up.and.down", "Bounce on hover", "A small hop when the pointer arrives",
-                toggle(on: prefs.hoverBounce) { [weak self] on in
-                    self?.prefs.hoverBounce = on
-                    if on { self?.preview.bounce() }
-                }),
-            row("music.note", "Track notice", "Show the new song when it changes",
-                toggle(on: prefs.trackNotice) { [weak self] in self?.prefs.trackNotice = $0 }),
-            row("speaker.wave.2", "Scroll for volume", "Scroll over the notch to change it",
-                toggle(on: prefs.scrollVolume) { [weak self] in self?.prefs.scrollVolume = $0 }),
-            row("slider.horizontal.3", "Volume", "Which volume scrolling changes", volume),
-            row("speaker.wave.3", "Show volume changes", "Volume keys and Control Center",
-                toggle(on: prefs.showVolumeChanges) { [weak self] in self?.prefs.showVolumeChanges = $0 }),
-            row("hand.draw", "Swipe to change track", "Swipe sideways over the notch to skip",
-                toggle(on: prefs.swipeTracks) { [weak self] in self?.prefs.swipeTracks = $0 }),
-            row("pause", "Stay while paused", "Keep the cover and controls around",
-                toggle(on: prefs.keepWhilePaused) { [weak self] in self?.prefs.keepWhilePaused = $0 }),
-            row("arrow.up.left.and.arrow.down.right", "Hide in full screen", "Only notices show over full-screen apps",
-                toggle(on: prefs.hideInFullScreen) { [weak self] in self?.prefs.hideInFullScreen = $0 }),
-            row("cursorarrow.rays", "Open on hover", "Open the player without clicking",
-                toggle(on: prefs.openOnHover) { [weak self] in self?.prefs.openOnHover = $0 }),
-            row("timer", "Notice duration", "How long notices stay on screen", duration),
-        ])
-
-        group("Devices", badge: "BETA", into: stack, rows: [
-            row("airpodspro", "Connected devices", "AirPods and headphones with their battery",
-                toggle(on: prefs.deviceConnect) { [weak self] in self?.prefs.deviceConnect = $0 }),
-            row("battery.25percent", "Low battery", "Warn when an accessory runs low",
-                toggle(on: prefs.deviceLowBattery) { [weak self] in self?.prefs.deviceLowBattery = $0 }),
-            row("powerplug", "Mac charging", "Show the battery when you plug in",
-                toggle(on: prefs.macCharging) { [weak self] in self?.prefs.macCharging = $0 }),
-        ])
+        return pane("Appearance") { stack in
+            stack.addArrangedSubview(preview)
+            stack.setCustomSpacing(18, after: preview)
+            card(into: stack, rows: [
+                row("paintpalette", "Accent color", "Equalizer, bars and icons", accentPicker),
+                row("waveform", "Equalizer", "Live follows the music you hear", equalizer),
+                row("arrow.up.and.down", "Bounce on hover", "A small hop when the pointer arrives",
+                    toggle(on: prefs.hoverBounce) { [weak self] on in
+                        self?.prefs.hoverBounce = on
+                        if on { self?.preview.bounce() }
+                    }),
+            ])
+        }
     }
 
-    private func group(_ title: String, badge: String? = nil, into stack: NSStackView, rows: [NSView]) {
-        let caption = NSTextField(labelWithString: title)
-        caption.font = .systemFont(ofSize: 12, weight: .semibold)
-        caption.textColor = .secondaryLabelColor
-        let captionRow = NSStackView(views: [caption])
-        captionRow.spacing = 6
-        if let badge { captionRow.addArrangedSubview(BadgeView(text: badge)) }
-        captionRow.edgeInsets = NSEdgeInsets(top: 0, left: 12, bottom: 0, right: 0)
-        stack.addArrangedSubview(captionRow)
-        stack.setCustomSpacing(7, after: captionRow)
+    private func gesturesPane() -> NSView {
+        let volume = segmented(["Mac", "Spotify"], values: Preferences.VolumeSource.allCases,
+                               selected: prefs.volumeSource) { [weak self] in self?.prefs.volumeSource = $0 }
+        return pane("Gestures") { stack in
+            card(into: stack, rows: [
+                row("speaker.wave.2", "Scroll for volume", "Scroll over the notch to change it",
+                    toggle(on: prefs.scrollVolume) { [weak self] in self?.prefs.scrollVolume = $0 }),
+                row("slider.horizontal.3", "Volume", "Which volume scrolling changes", volume),
+            ])
+            card(into: stack, rows: [
+                row("hand.draw", "Swipe to change track", "Swipe sideways over the notch to skip",
+                    toggle(on: prefs.swipeTracks) { [weak self] in self?.prefs.swipeTracks = $0 }),
+            ])
+        }
+    }
 
+    private func noticesPane() -> NSView {
+        let duration = segmented(["Short", "Medium", "Long"], values: Preferences.Duration.allCases,
+                                 selected: prefs.noticeDuration) { [weak self] in self?.prefs.noticeDuration = $0 }
+        return pane("Notices") { stack in
+            card(into: stack, rows: [
+                row("music.note", "Track notice", "Show the new song when it changes",
+                    toggle(on: prefs.trackNotice) { [weak self] in self?.prefs.trackNotice = $0 }),
+                row("speaker.wave.3", "Show volume changes", "Volume keys and Control Center",
+                    toggle(on: prefs.showVolumeChanges) { [weak self] in self?.prefs.showVolumeChanges = $0 }),
+            ])
+            card(into: stack, rows: [
+                row("timer", "Notice duration", "How long notices stay on screen", duration),
+            ])
+        }
+    }
+
+    private func devicesPane() -> NSView {
+        pane("Devices") { stack in
+            card(into: stack, rows: [
+                row("airpodspro", "Connected devices", "AirPods and headphones with their battery",
+                    toggle(on: prefs.deviceConnect) { [weak self] in self?.prefs.deviceConnect = $0 }),
+                row("battery.25percent", "Low battery", "Warn when an accessory runs low",
+                    toggle(on: prefs.deviceLowBattery) { [weak self] in self?.prefs.deviceLowBattery = $0 }),
+                row("powerplug", "Mac charging", "Show the battery when you plug in",
+                    toggle(on: prefs.macCharging) { [weak self] in self?.prefs.macCharging = $0 }),
+            ], footnote: "Beta: accessory batteries come from a macOS call that isn't public, so these notices may stop working after a system update.")
+        }
+    }
+
+    // MARK: Building blocks
+
+    private func pane(_ title: String, _ build: (NSStackView) -> Void) -> NSView {
+        let document = FlippedView()
+        document.wantsLayer = true
+        document.translatesAutoresizingMaskIntoConstraints = false
+
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 0
+        stack.edgeInsets = NSEdgeInsets(top: 44, left: 28, bottom: 24, right: 28)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+
+        let heading = NSTextField(labelWithString: title)
+        heading.font = .systemFont(ofSize: 20, weight: .bold)
+        stack.addArrangedSubview(heading)
+        stack.setCustomSpacing(16, after: heading)
+        build(stack)
+
+        document.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: document.topAnchor),
+            stack.bottomAnchor.constraint(equalTo: document.bottomAnchor),
+            stack.leadingAnchor.constraint(equalTo: document.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: document.trailingAnchor),
+        ])
+        for view in stack.arrangedSubviews where view !== heading {
+            view.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -56).isActive = true
+        }
+        return document
+    }
+
+    private func card(into stack: NSStackView, rows: [NSView], footnote: String? = nil) {
         let card = SettingsCard()
         let column = NSStackView()
         column.orientation = .vertical
@@ -193,7 +255,17 @@ final class SettingsWindowController: NSWindowController {
             view.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true
         }
         stack.addArrangedSubview(card)
-        stack.setCustomSpacing(20, after: card)
+        stack.setCustomSpacing(16, after: card)
+
+        guard let footnote else { return }
+        let note = NSTextField(wrappingLabelWithString: footnote)
+        note.font = .systemFont(ofSize: 11)
+        note.textColor = .secondaryLabelColor
+        let holder = NSStackView(views: [note])
+        holder.edgeInsets = NSEdgeInsets(top: 0, left: 12, bottom: 0, right: 12)
+        stack.setCustomSpacing(8, after: card)
+        stack.addArrangedSubview(holder)
+        stack.setCustomSpacing(16, after: holder)
     }
 
     private func row(_ symbol: String, _ title: String, _ detail: String, _ control: NSView) -> NSView {
@@ -281,41 +353,6 @@ final class SettingsWindowController: NSWindowController {
 
 private final class FlippedView: NSView {
     override var isFlipped: Bool { true }
-}
-
-private final class BadgeView: NSView {
-    private let label: NSTextField
-
-    init(text: String) {
-        label = NSTextField(labelWithString: text)
-        super.init(frame: .zero)
-        wantsLayer = true
-        label.font = .systemFont(ofSize: 9, weight: .bold)
-        label.textColor = .controlAccentColor
-        label.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(label)
-        NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
-            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
-            label.topAnchor.constraint(equalTo: topAnchor, constant: 2),
-            label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -2),
-        ])
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    override var wantsUpdateLayer: Bool { true }
-
-    override func updateLayer() {
-        layer?.cornerRadius = bounds.height / 2
-        layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.15).cgColor
-    }
-
-    override func layout() {
-        super.layout()
-        layer?.cornerRadius = bounds.height / 2
-    }
 }
 
 private final class SettingsCard: NSView {
