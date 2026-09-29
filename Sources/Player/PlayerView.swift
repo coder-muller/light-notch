@@ -282,7 +282,7 @@ final class PlayerView: NSView {
         meterHide?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.hideVolume(animated: true) }
         meterHide = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + Preferences.shared.volumeDelay, execute: work)
     }
 
     private func hideVolume(animated: Bool) {

@@ -67,6 +67,10 @@ final class SettingsWindowController: NSWindowController {
         checkbox("Open the player when hovering over the notch", on: prefs.openOnHover) { [weak self] in
             self?.prefs.openOnHover = $0
         }
+        popup("Notices stay for:", items: [("Short", "short"), ("Medium", "medium"), ("Long", "long")],
+              selected: prefs.noticeDuration.rawValue) { [weak self] in
+            self?.prefs.noticeDuration = Preferences.Duration(rawValue: $0) ?? .medium
+        }
     }
 
     func section(_ title: String) {
