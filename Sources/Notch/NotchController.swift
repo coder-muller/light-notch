@@ -45,7 +45,7 @@ final class NotchController: NSObject, NSMenuDelegate {
         menu.addItem(withTitle: "Quit LightNotch", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         return menu
     }()
-    private lazy var settings = SettingsWindowController()
+    private var settings: SettingsWindowController?
 
     private var notchSize = CGSize.zero
     private var layouts: [Mode: Layout] = [:]
@@ -304,7 +304,11 @@ final class NotchController: NSObject, NSMenuDelegate {
 
     func menuDidClose(_ menu: NSMenu) { scheduleClose() }
 
-    @objc private func openSettings() { settings.show() }
+    @objc private func openSettings() {
+        let settings = self.settings ?? SettingsWindowController { [weak self] in self?.spotify.artwork }
+        self.settings = settings
+        settings.show()
+    }
 
     private func preferencesChanged() {
         compact?.update()
@@ -317,6 +321,7 @@ final class NotchController: NSObject, NSMenuDelegate {
     private func spotifyChanged() {
         player?.update()
         compact?.update()
+        settings?.refresh()
         notePeek()
         transition(to: desiredMode)
         updateAudioTap()
