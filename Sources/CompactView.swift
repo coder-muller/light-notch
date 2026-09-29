@@ -160,12 +160,18 @@ final class CompactView: NSView {
 
     // MARK: - Equalizer animations
 
+    /// Bars never snap: leaving, they ease down to rest one after another; arriving, they rise from rest
+    /// in a small ripple.
+    private static let settleDuration: CFTimeInterval = 0.28
+    private static let settleStagger: CFTimeInterval = 0.035
+    private static let rest = [CGFloat](repeating: CompactView.barMinHeight, count: CompactView.barCount)
+
     private func syncAnimations() {
         let shouldAnimate = active && playing
         if live {
             // Real levels drive the bars: never re-arm the synthetic animation.
-            if animating { stopAnimations() }
-            if !shouldAnimate { applyHeights([CGFloat](repeating: CompactView.barMinHeight, count: CompactView.barCount), animated: true) }
+            if animating { stopAnimations(settle: false) }
+            if !shouldAnimate { applyHeights(CompactView.rest, duration: CompactView.settleDuration) }
             return
         }
         if shouldAnimate {
@@ -174,32 +180,78 @@ final class CompactView: NSView {
                 startAnimations()
             }
         } else if animating {
-            stopAnimations()
+            stopAnimations(settle: true)
         }
     }
 
+    /// Heights on screen right now (mid-animation included).
+    private func currentHeights() -> [CGFloat] {
+        bars.map { $0.presentation()?.bounds.height ?? $0.bounds.height }
+    }
+
+    /// Starts the loops with staggered begin times (the phases) instead of a time offset, so every bar
+    /// rises from rest instead of jumping mid-cycle. Bars not at rest first ease there.
     private func startAnimations() {
         animating = true
-        for (i, bar) in bars.enumerated() {
-            let anim = CABasicAnimation(keyPath: "bounds.size.height")
-            anim.fromValue = CompactView.barMinHeight
-            anim.toValue = CompactView.barMaxHeights[i]
-            anim.duration = CompactView.barDurations[i]
-            anim.autoreverses = true
-            anim.repeatCount = .infinity
-            anim.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            anim.timeOffset = CompactView.barPhases[i]
-            anim.isRemovedOnCompletion = false
-            bar.add(anim, forKey: CompactView.animationKey)
-        }
-    }
-
-    private func stopAnimations() {
-        animating = false
+        let now = CACurrentMediaTime()
+        let current = currentHeights()
+        let lead: CFTimeInterval = 0.12   // time to ease a moving bar back to rest
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        for bar in bars { bar.removeAllAnimations() }   // model value = minimum height
+        for (i, bar) in bars.enumerated() {
+            barHeights[i] = CompactView.barMinHeight
+            bar.bounds = CGRect(x: 0, y: 0, width: CompactView.barWidth, height: CompactView.barMinHeight)
+            bar.removeAnimation(forKey: "settle")
+
+            let loop = CABasicAnimation(keyPath: "bounds.size.height")
+            loop.fromValue = CompactView.barMinHeight
+            loop.toValue = CompactView.barMaxHeights[i]
+            loop.duration = CompactView.barDurations[i]
+            loop.autoreverses = true
+            loop.repeatCount = .infinity
+            loop.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            loop.beginTime = now + lead + CompactView.barPhases[i]
+            loop.fillMode = .backwards
+            loop.isRemovedOnCompletion = false
+            bar.add(loop, forKey: CompactView.animationKey)
+
+            // Added after the loop, so it wins until it ends; then the loop's backward fill holds rest.
+            if abs(current[i] - CompactView.barMinHeight) > 0.3 {
+                bar.add(settle(from: current[i], delay: 0, duration: lead), forKey: "settle")
+            }
+        }
         CATransaction.commit()
+    }
+
+    /// `settle`: bars ease down to rest one after another. Otherwise they freeze where they are
+    /// (live levels take over from that point).
+    private func stopAnimations(settle: Bool) {
+        animating = false
+        let current = currentHeights()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for (i, bar) in bars.enumerated() {
+            bar.removeAnimation(forKey: CompactView.animationKey)
+            let height = settle ? CompactView.barMinHeight : current[i]
+            barHeights[i] = height
+            bar.bounds = CGRect(x: 0, y: 0, width: CompactView.barWidth, height: height)
+            if settle, abs(current[i] - height) > 0.3 {
+                bar.add(self.settle(from: current[i], delay: Double(i) * CompactView.settleStagger,
+                                    duration: CompactView.settleDuration), forKey: "settle")
+            }
+        }
+        CATransaction.commit()
+    }
+
+    private func settle(from height: CGFloat, delay: CFTimeInterval, duration: CFTimeInterval) -> CABasicAnimation {
+        let anim = CABasicAnimation(keyPath: "bounds.size.height")
+        anim.fromValue = height
+        anim.toValue = CompactView.barMinHeight
+        anim.duration = duration
+        anim.beginTime = CACurrentMediaTime() + delay
+        anim.fillMode = .backwards
+        anim.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        return anim
     }
 
     // MARK: - Shared cover transition
@@ -232,7 +284,7 @@ final class CompactView: NSView {
     func setLevels(_ levels: [Float]) {
         guard levels.count >= CompactView.barCount else { return }
         live = true
-        if animating || bars.first?.animation(forKey: CompactView.animationKey) != nil { stopAnimations() }
+        if animating || bars.first?.animation(forKey: CompactView.animationKey) != nil { stopAnimations(settle: false) }
 
         var targets = [CGFloat](repeating: CompactView.barMinHeight, count: CompactView.barCount)
         if active && playing {
@@ -243,30 +295,34 @@ final class CompactView: NSView {
                     + (CompactView.barMaxHeights[i] - CompactView.barMinHeight) * level.squareRoot()
             }
         }
-        applyHeights(targets, animated: true)
+        // Short linear implicit animation smooths between ~30 Hz samples.
+        applyHeights(targets, duration: CompactView.levelSmoothing, timing: .linear)
     }
 
     /// Volta para a animação sintética (chamado quando o tap de áudio para/não está disponível).
+    /// As barras partem de onde estão: a animação sintética as leva ao repouso antes de começar.
     func useSyntheticAnimation() {
         guard live else { return }
         live = false
-        // Return to the rest height first so the synthetic animation starts from a clean model.
-        applyHeights([CGFloat](repeating: CompactView.barMinHeight, count: CompactView.barCount), animated: false)
-        syncAnimations()
+        if active && playing {
+            syncAnimations()
+        } else {
+            applyHeights(CompactView.rest, duration: CompactView.settleDuration)
+        }
     }
 
-    /// Sets bar heights (bounds keeps them vertically centered around `position`).
-    /// Skips all work when no bar changes by a perceptible amount.
-    private func applyHeights(_ targets: [CGFloat], animated: Bool) {
+    /// Sets bar heights (bounds keeps them vertically centered around `position`), animated over
+    /// `duration` unless nil. Skips all work when no bar changes by a perceptible amount.
+    private func applyHeights(_ targets: [CGFloat], duration: CFTimeInterval?,
+                              timing: CAMediaTimingFunctionName = .easeOut) {
         var changed = false
         for i in 0..<CompactView.barCount where abs(targets[i] - barHeights[i]) >= 0.3 { changed = true; break }
         guard changed else { return }
 
         CATransaction.begin()
-        if animated {
-            // Short linear implicit animation smooths between ~30 Hz samples.
-            CATransaction.setAnimationDuration(CompactView.levelSmoothing)
-            CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .linear))
+        if let duration {
+            CATransaction.setAnimationDuration(duration)
+            CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: timing))
         } else {
             CATransaction.setDisableActions(true)
         }

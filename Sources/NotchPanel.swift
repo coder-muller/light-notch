@@ -483,8 +483,9 @@ final class NotchController: NSObject, NSMenuDelegate {
             compact.setActive(true)
             fade(compact, to: 1, duration: animated ? 0.2 : 0, delay: animated ? 0.12 : 0)
         } else if let compact, compact.alphaValue > 0 {
+            // Long enough to see the bars ease down to rest (CompactView settles them) while fading.
             compact.setActive(false)
-            fade(compact, to: 0, duration: animated ? 0.1 : 0, delay: 0)
+            fade(compact, to: 0, duration: animated ? 0.25 : 0, delay: 0)
         }
         if !animated { hideInvisibleContent() }
     }
