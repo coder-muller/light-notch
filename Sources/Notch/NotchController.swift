@@ -20,6 +20,7 @@ private enum Metrics {
     static let deviceInset: CGFloat = 18
     static let deviceHideDelay: TimeInterval = 3.5
     static let hoverOpenDelay: TimeInterval = 0.35
+    static let swipeThreshold: CGFloat = 50
 }
 
 final class NotchController: NSObject, NSMenuDelegate {
@@ -68,6 +69,10 @@ final class NotchController: NSObject, NSMenuDelegate {
     private var generation = 0
     private var pendingClose: DispatchWorkItem?
     private var volumeRemainder: CGFloat = 0
+    private enum ScrollAxis { case undecided, vertical, horizontal }
+    private var scrollAxis = ScrollAxis.undecided
+    private var swipeDistance: CGFloat = 0
+    private var swipeDone = false
     private var hoverOpen: DispatchWorkItem?
     private var volumeShown = false
     private var peekShown = false
@@ -235,8 +240,46 @@ final class NotchController: NSObject, NSMenuDelegate {
     }
 
     private func scrolled(_ event: NSEvent) {
-        guard Preferences.shared.scrollVolume, mode != .notch, spotify.nowPlaying != nil,
-              event.momentumPhase.isEmpty else { return }
+        guard mode != .notch, spotify.nowPlaying != nil, event.momentumPhase.isEmpty else { return }
+        if event.phase.contains(.began) {
+            scrollAxis = .undecided
+            swipeDistance = 0
+            swipeDone = false
+        }
+        if event.phase.isEmpty { scrollAxis = .vertical }
+        if scrollAxis == .undecided {
+            let dx = abs(event.scrollingDeltaX), dy = abs(event.scrollingDeltaY)
+            guard dx + dy >= 2 else { return }
+            scrollAxis = dx > dy * 1.2 ? .horizontal : .vertical
+        }
+        if scrollAxis == .horizontal { swiped(event) } else { changeVolume(event) }
+        if event.phase.contains(.ended) || event.phase.contains(.cancelled) { scrollAxis = .undecided }
+    }
+
+    private func swiped(_ event: NSEvent) {
+        guard Preferences.shared.swipeTracks, !swipeDone else { return }
+        swipeDistance += event.isDirectionInvertedFromDevice ? event.scrollingDeltaX : -event.scrollingDeltaX
+        guard abs(swipeDistance) >= Metrics.swipeThreshold else { return }
+        swipeDone = true
+        let forward = swipeDistance < 0
+        nudge(left: forward)
+        if forward { spotify.nextTrack() } else { spotify.previousTrack() }
+    }
+
+    private func nudge(left: Bool) {
+        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
+        let shift: CGFloat = left ? -6 : 6
+        let anim = CAKeyframeAnimation(keyPath: "transform.translation.x")
+        anim.values = [0, shift, 0]
+        anim.keyTimes = [0, 0.35, 1]
+        anim.timingFunctions = [CAMediaTimingFunction(name: .easeOut), CAMediaTimingFunction(name: .easeInEaseOut)]
+        anim.duration = 0.32
+        shapeLayers.forEach { $0.add(anim, forKey: "nudge") }
+        root.content.layer?.add(anim, forKey: "nudge")
+    }
+
+    private func changeVolume(_ event: NSEvent) {
+        guard Preferences.shared.scrollVolume else { return }
         let useSystem = Preferences.shared.volumeSource == .system
         guard let volume = useSystem ? systemVolume.level : spotify.volume else {
             if !useSystem { spotify.refreshVolume() }
