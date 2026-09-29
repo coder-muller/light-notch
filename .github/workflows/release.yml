@@ -1,0 +1,32 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set version
+        run: |
+          plutil -replace CFBundleShortVersionString -string "${GITHUB_REF_NAME#v}" Resources/Info.plist
+          plutil -replace CFBundleVersion -string "$GITHUB_RUN_NUMBER" Resources/Info.plist
+
+      - name: Build
+        run: ./build.sh build
+
+      - name: Package
+        run: ditto -c -k --keepParent build/LightNotch.app "LightNotch-$GITHUB_REF_NAME.zip"
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" "LightNotch-$GITHUB_REF_NAME.zip" \
+            --title "LightNotch $GITHUB_REF_NAME" --generate-notes
