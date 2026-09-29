@@ -104,6 +104,8 @@ final class SettingsWindowController: NSWindowController {
             row("waveform", "Equalizer", "Live follows the music you hear", equalizer),
         ])
 
+        let volume = segmented(["Mac", "Spotify"], values: Preferences.VolumeSource.allCases,
+                               selected: prefs.volumeSource) { [weak self] in self?.prefs.volumeSource = $0 }
         let duration = segmented(["Short", "Medium", "Long"], values: Preferences.Duration.allCases,
                                  selected: prefs.noticeDuration) { [weak self] in self?.prefs.noticeDuration = $0 }
         group("Behavior", into: stack, rows: [
@@ -116,6 +118,7 @@ final class SettingsWindowController: NSWindowController {
                 toggle(on: prefs.trackNotice) { [weak self] in self?.prefs.trackNotice = $0 }),
             row("speaker.wave.2", "Scroll for volume", "Scroll over the notch to change it",
                 toggle(on: prefs.scrollVolume) { [weak self] in self?.prefs.scrollVolume = $0 }),
+            row("slider.horizontal.3", "Volume", "Which volume scrolling changes", volume),
             row("pause", "Stay while paused", "Keep the cover and controls around",
                 toggle(on: prefs.keepWhilePaused) { [weak self] in self?.prefs.keepWhilePaused = $0 }),
             row("cursorarrow.rays", "Open on hover", "Open the player without clicking",

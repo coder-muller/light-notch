@@ -12,6 +12,10 @@ final class Preferences {
         case live, animated, hidden
     }
 
+    enum VolumeSource: String, CaseIterable {
+        case system, spotify
+    }
+
     enum Duration: String, CaseIterable {
         case short, medium, long
     }
@@ -43,6 +47,11 @@ final class Preferences {
     var scrollVolume: Bool {
         get { bool("scrollVolume", default: true) }
         set { set("scrollVolume", newValue) }
+    }
+
+    var volumeSource: VolumeSource {
+        get { value("volumeSource", default: .system) }
+        set { set("volumeSource", newValue.rawValue) }
     }
 
     var keepWhilePaused: Bool {
