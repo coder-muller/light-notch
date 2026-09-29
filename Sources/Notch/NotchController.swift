@@ -188,7 +188,7 @@ final class NotchController: NSObject, NSMenuDelegate {
 
     private var desiredMode: Mode {
         if isOpen { return .expanded }
-        guard spotify.nowPlaying?.isPlaying == true else { return .notch }
+        guard spotify.nowPlaying != nil else { return .notch }
         if volumeShown { return .compactVolume }
         return peekShown ? .compactPeek : .compact
     }
