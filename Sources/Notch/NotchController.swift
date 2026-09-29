@@ -14,9 +14,7 @@ private enum Metrics {
     static let volumeRow: CGFloat = 26
     static let volumeRadius: CGFloat = 18
     static let volumeInset: CGFloat = 16
-    static let volumeHideDelay: TimeInterval = 1.2
     static let peekRow: CGFloat = 46
-    static let peekHideDelay: TimeInterval = 2.5
     static let hoverOpenDelay: TimeInterval = 0.35
 }
 
@@ -245,7 +243,7 @@ final class NotchController: NSObject, NSMenuDelegate {
             self.transition(to: self.desiredMode)
         }
         volumeHide = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + Metrics.volumeHideDelay, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + Preferences.shared.volumeDelay, execute: work)
     }
 
     private func notePeek() {
@@ -266,7 +264,7 @@ final class NotchController: NSObject, NSMenuDelegate {
             self.transition(to: self.desiredMode)
         }
         peekHide = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + Metrics.peekHideDelay, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + Preferences.shared.peekDelay, execute: work)
     }
 
     private func scheduleHoverOpen() {
