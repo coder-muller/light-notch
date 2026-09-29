@@ -341,6 +341,22 @@ final class CompactView: NSView {
 
     var coverFrame: NSRect { coverLayer.frame }
 
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        guard status == .paused, point.x >= bounds.width - CompactView.wingWidth else {
+            super.mouseDown(with: event)
+            return
+        }
+        let press = CAKeyframeAnimation(keyPath: "transform.scale")
+        press.values = [1, 0.75, 1]
+        press.keyTimes = [0, 0.4, 1]
+        press.duration = 0.2
+        statusIcon.add(press, forKey: "scale")
+        spotify.playPause()
+    }
+
     func setCoverVisible(_ visible: Bool) {
         coverVisible = visible
         coverLayer.removeAnimation(forKey: "dim")
