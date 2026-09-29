@@ -59,6 +59,23 @@ final class Preferences {
         set { set("keepWhilePaused", newValue) }
     }
 
+    var deviceConnect: Bool {
+        get { bool("deviceConnect", default: false) }
+        set { set("deviceConnect", newValue) }
+    }
+
+    var deviceLowBattery: Bool {
+        get { bool("deviceLowBattery", default: false) }
+        set { set("deviceLowBattery", newValue) }
+    }
+
+    var macCharging: Bool {
+        get { bool("macCharging", default: false) }
+        set { set("macCharging", newValue) }
+    }
+
+    var watchesDevices: Bool { deviceConnect || deviceLowBattery || macCharging }
+
     var openOnHover: Bool {
         get { bool("openOnHover", default: false) }
         set { set("openOnHover", newValue) }
