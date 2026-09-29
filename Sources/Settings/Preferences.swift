@@ -30,7 +30,7 @@ final class Preferences {
     }
 
     var equalizer: Equalizer {
-        get { value("equalizer", default: .live) }
+        get { value("equalizer", default: .animated) }
         set { set("equalizer", newValue.rawValue) }
     }
 
