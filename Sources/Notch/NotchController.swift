@@ -15,12 +15,14 @@ private enum Metrics {
     static let volumeRadius: CGFloat = 18
     static let volumeInset: CGFloat = 16
     static let volumeHideDelay: TimeInterval = 1.2
+    static let peekRow: CGFloat = 46
+    static let peekHideDelay: TimeInterval = 2.5
 }
 
 final class NotchController: NSObject, NSMenuDelegate {
     private enum Mode {
-        case notch, compact, compactVolume, expanded
-        var showsWings: Bool { self == .compact || self == .compactVolume }
+        case notch, compact, compactVolume, compactPeek, expanded
+        var showsWings: Bool { self == .compact || self == .compactVolume || self == .compactPeek }
     }
 
     private struct Layout {
@@ -50,6 +52,14 @@ final class NotchController: NSObject, NSMenuDelegate {
     private var pendingClose: DispatchWorkItem?
     private var volumeRemainder: CGFloat = 0
     private var volumeShown = false
+    private var peekShown = false
+    private var peekHide: DispatchWorkItem?
+    private var seenTrackID: String?
+    private let trackPeek: TrackPeekView = {
+        let peek = TrackPeekView(frame: .zero)
+        peek.alphaValue = 0
+        return peek
+    }()
     private var volumeHide: DispatchWorkItem?
     private let compactMeter: VolumeMeter = {
         let meter = VolumeMeter(frame: .zero, iconSize: 11, barHeight: 6)
@@ -119,6 +129,9 @@ final class NotchController: NSObject, NSMenuDelegate {
         layouts[.compactVolume] = layout(CGSize(width: notchSize.width + 2 * CompactView.wingWidth,
                                                 height: notchSize.height + Metrics.volumeRow),
                                          radius: Metrics.volumeRadius, side: m, bottom: m)
+        layouts[.compactPeek] = layout(CGSize(width: notchSize.width + 2 * CompactView.wingWidth,
+                                              height: notchSize.height + Metrics.peekRow),
+                                       radius: Metrics.volumeRadius, side: m, bottom: m)
         layouts[.expanded] = layout(CGSize(width: max(PlayerView.size.width + 2 * Metrics.sidePadding, notchSize.width),
                                            height: notchSize.height + Metrics.topGap + PlayerView.size.height + Metrics.bottomPadding),
                                     radius: Metrics.expandedRadius, side: m, bottom: m)
@@ -127,6 +140,8 @@ final class NotchController: NSObject, NSMenuDelegate {
         pendingClose?.cancel()
         volumeHide?.cancel()
         volumeShown = false
+        peekHide?.cancel()
+        peekShown = false
         generation &+= 1
         isOpen = false
         mode = desiredMode
@@ -157,6 +172,9 @@ final class NotchController: NSObject, NSMenuDelegate {
                                                y: b.maxY - compact.frame.height))
             }
             let meterWidth = notchSize.width + 2 * CompactView.wingWidth - 2 * Metrics.volumeInset
+            trackPeek.frame = NSRect(x: ((b.width - meterWidth) / 2).rounded(),
+                                     y: b.maxY - notchSize.height - 4 - TrackPeekView.height,
+                                     width: meterWidth, height: TrackPeekView.height)
             compactMeter.frame = NSRect(x: ((b.width - meterWidth) / 2).rounded(), y: b.maxY - notchSize.height - 19,
                                         width: meterWidth, height: 14)
         }
@@ -171,7 +189,8 @@ final class NotchController: NSObject, NSMenuDelegate {
     private var desiredMode: Mode {
         if isOpen { return .expanded }
         guard spotify.nowPlaying?.isPlaying == true else { return .notch }
-        return volumeShown ? .compactVolume : .compact
+        if volumeShown { return .compactVolume }
+        return peekShown ? .compactPeek : .compact
     }
 
     private func toggle() {
@@ -203,6 +222,8 @@ final class NotchController: NSObject, NSMenuDelegate {
     }
 
     private func showCompactVolume() {
+        peekHide?.cancel()
+        peekShown = false
         volumeShown = true
         transition(to: desiredMode)
         volumeHide?.cancel()
@@ -213,6 +234,27 @@ final class NotchController: NSObject, NSMenuDelegate {
         }
         volumeHide = work
         DispatchQueue.main.asyncAfter(deadline: .now() + Metrics.volumeHideDelay, execute: work)
+    }
+
+    private func notePeek() {
+        guard let track = spotify.nowPlaying, track.trackID != seenTrackID else { return }
+        if seenTrackID == nil || isOpen {
+            seenTrackID = track.trackID
+            return
+        }
+        guard track.isPlaying else { return }
+        seenTrackID = track.trackID
+        guard !volumeShown else { return }
+        trackPeek.show(track, animated: mode == .compactPeek, backwards: spotify.lastChangeWentBack)
+        peekShown = true
+        peekHide?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.peekShown = false
+            self.transition(to: self.desiredMode)
+        }
+        peekHide = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Metrics.peekHideDelay, execute: work)
     }
 
     private func cancelClose() {
@@ -243,6 +285,7 @@ final class NotchController: NSObject, NSMenuDelegate {
     private func spotifyChanged() {
         player?.update()
         compact?.update()
+        notePeek()
         transition(to: desiredMode)
         updateAudioTap()
     }
@@ -275,7 +318,7 @@ final class NotchController: NSObject, NSMenuDelegate {
         generation &+= 1
         let token = generation
         let growing = target.frame.width >= current.frame.width && target.frame.height >= current.frame.height
-        let damping: CGFloat = newMode == .expanded ? 24 : newMode == .compactVolume ? 26 : 34
+        let damping: CGFloat = newMode == .expanded ? 24 : newMode == .compact || newMode == .notch ? 34 : 26
 
         showContent(for: newMode, animated: true)
         CATransaction.begin()
@@ -396,6 +439,13 @@ final class NotchController: NSObject, NSMenuDelegate {
             fade(player, to: 1, duration: animated ? 0.2 : 0, delay: animated ? 0.07 : 0)
         } else if let player, player.alphaValue > 0 {
             fade(player, to: 0, duration: animated ? 0.12 : 0, delay: 0)
+        }
+
+        if mode == .compactPeek {
+            if trackPeek.superview == nil { root.content.addSubview(trackPeek) }
+            VolumeMeter.fade(trackPeek, to: 1, duration: animated ? 0.22 : 0)
+        } else if trackPeek.alphaValue > 0 {
+            VolumeMeter.fade(trackPeek, to: 0, duration: animated ? 0.12 : 0)
         }
 
         if mode == .compactVolume {
