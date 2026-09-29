@@ -50,6 +50,20 @@ final class SettingsWindowController: NSWindowController {
               selected: prefs.equalizer.rawValue) { [weak self] in
             self?.prefs.equalizer = Preferences.Equalizer(rawValue: $0) ?? .live
         }
+
+        section("Behavior")
+        checkbox("Bounce when the pointer enters the notch", on: prefs.hoverBounce) { [weak self] in
+            self?.prefs.hoverBounce = $0
+        }
+        checkbox("Show the new track when the song changes", on: prefs.trackNotice) { [weak self] in
+            self?.prefs.trackNotice = $0
+        }
+        checkbox("Scroll over the notch to change the volume", on: prefs.scrollVolume) { [weak self] in
+            self?.prefs.scrollVolume = $0
+        }
+        checkbox("Keep showing the track while paused", on: prefs.keepWhilePaused) { [weak self] in
+            self?.prefs.keepWhilePaused = $0
+        }
     }
 
     func section(_ title: String) {

@@ -194,7 +194,7 @@ final class NotchController: NSObject, NSMenuDelegate {
 
     private var desiredMode: Mode {
         if isOpen { return .expanded }
-        guard spotify.nowPlaying != nil else { return .notch }
+        guard let track = spotify.nowPlaying, track.isPlaying || Preferences.shared.keepWhilePaused else { return .notch }
         if volumeShown { return .compactVolume }
         return peekShown ? .compactPeek : .compact
     }
@@ -206,7 +206,8 @@ final class NotchController: NSObject, NSMenuDelegate {
     }
 
     private func scrolled(_ event: NSEvent) {
-        guard mode != .notch, spotify.nowPlaying != nil, event.momentumPhase.isEmpty else { return }
+        guard Preferences.shared.scrollVolume, mode != .notch, spotify.nowPlaying != nil,
+              event.momentumPhase.isEmpty else { return }
         guard let volume = spotify.volume else {
             spotify.refreshVolume()
             return
@@ -250,7 +251,7 @@ final class NotchController: NSObject, NSMenuDelegate {
         }
         guard track.isPlaying else { return }
         seenTrackID = track.trackID
-        guard !volumeShown else { return }
+        guard Preferences.shared.trackNotice, !volumeShown else { return }
         trackPeek.show(track, animated: mode == .compactPeek, backwards: spotify.lastChangeWentBack)
         peekShown = true
         peekHide?.cancel()
@@ -411,7 +412,7 @@ final class NotchController: NSObject, NSMenuDelegate {
     }
 
     private func bounce() {
-        guard mode == .notch || mode == .compact, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+        guard Preferences.shared.hoverBounce, mode == .notch || mode == .compact, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
               let current = layouts[mode], current.shape.width > 0, current.shape.height > 0 else { return }
         let size = current.shape
 
