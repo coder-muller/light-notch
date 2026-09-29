@@ -1,9 +1,11 @@
 import AppKit
+import ServiceManagement
 
 final class SettingsWindowController: NSWindowController {
     let prefs = Preferences.shared
     private let grid = NSGridView()
     private var actions: [ControlAction] = []
+    private var loginBox: NSButton?
 
     init() {
         let window = NSWindow(contentRect: .zero, styleMask: [.titled, .closable], backing: .buffered, defer: false)
@@ -36,11 +38,17 @@ final class SettingsWindowController: NSWindowController {
     func show() {
         guard let window else { return }
         if !window.isVisible { window.center() }
+        loginBox?.state = SMAppService.mainApp.status == .enabled ? .on : .off
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
     }
 
     private func build() {
+        section("General")
+        loginBox = checkbox("Open at login", on: SMAppService.mainApp.status == .enabled) { [weak self] on in
+            self?.setOpenAtLogin(on)
+        }
+
         section("Appearance")
         popup("Accent color:", items: [("Album cover", "cover"), ("Spotify green", "spotify"), ("White", "white")],
               selected: prefs.accent.rawValue) { [weak self] in
@@ -71,6 +79,17 @@ final class SettingsWindowController: NSWindowController {
               selected: prefs.noticeDuration.rawValue) { [weak self] in
             self?.prefs.noticeDuration = Preferences.Duration(rawValue: $0) ?? .medium
         }
+    }
+
+    private func setOpenAtLogin(_ on: Bool) {
+        let service = SMAppService.mainApp
+        do {
+            if on { try service.register() } else { try service.unregister() }
+        } catch {
+            NSLog("LightNotch: could not update the login item: \(error.localizedDescription)")
+        }
+        if service.status == .requiresApproval { SMAppService.openSystemSettingsLoginItems() }
+        loginBox?.state = service.status == .enabled ? .on : .off
     }
 
     func section(_ title: String) {
